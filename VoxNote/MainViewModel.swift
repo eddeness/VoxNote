@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Observation
 import Translation
+import SwiftData
 
 enum AppState: Equatable {
     case ready
@@ -10,7 +11,7 @@ enum AppState: Equatable {
 }
 
 enum TranscribeState: Equatable {
-    case transcribing
+    case transcribing(String)  // progress message e.g. "Transcribing… 42%"
     case done([TranscriptSegment])
     case error(String)
 }
@@ -18,7 +19,7 @@ enum TranscribeState: Equatable {
 enum LLMTaskState: Equatable {
     case running(String)
     case done(String)
-    case notDownloaded
+    case notDownloaded   // language supported but not yet downloaded
     case error(String)
 }
 
@@ -47,26 +48,13 @@ class MainViewModel {
     private let transcription = TranscriptionService()
     let llm = LocalLLMService()
 
+    // SwiftData context — injected from View
+    var modelContext: ModelContext?
+
     // MARK: - Whisper model state
     var isWhisperLoaded = false
     var whisperStatus = "Model not loaded"
-    
-    
-    var isProcessing: Bool {
-        transcribeStates.values.contains {
-            if case .transcribing = $0 { return true }
-            return false
-        } ||
-        summaryStates.values.contains {
-            if case .running = $0 { return true }
-            return false
-        } ||
-        translationStates.values.contains {
-            if case .running = $0 { return true }
-            return false
-        }
-    }
-    
+
     private var recordingTimer: Timer?
 
     // MARK: - Lifecycle
@@ -111,9 +99,7 @@ class MainViewModel {
                 elapsedSeconds = 0
                 statusMessage = "Recording…"
                 recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.elapsedSeconds += 1
-                    }
+                    Task { @MainActor in self?.elapsedSeconds += 1 }
                 }
             } catch {
                 appState = .error(error.localizedDescription)
@@ -160,23 +146,61 @@ class MainViewModel {
     }
 
     // MARK: - Transcription
+    
+    
+    var isProcessing: Bool {
+        transcribeStates.values.contains {
+            if case .transcribing = $0 { return true }
+            return false
+        } ||
+        summaryStates.values.contains {
+            if case .running = $0 { return true }
+            return false
+        } ||
+        translationStates.values.contains {
+            if case .running = $0 { return true }
+            return false
+        }
+    }
+    
+    var isTranscribing: Bool {
+        transcribeStates.values.contains {
+            if case .transcribing = $0 { return true }
+            return false
+        }
+    }
 
     func transcribe(_ recording: Recording) async {
         if !isWhisperLoaded { await loadWhisperModel() }
         guard isWhisperLoaded else { return }
 
-        transcribeStates[recording.id] = .transcribing
+        let id = recording.id
+        transcribeStates[id] = .transcribing("Transcribing… 0%")
         do {
             let segments = try await transcription.transcribe(
                 audioURL: recording.url,
-                onProgress: { _ in }
+                onProgress: { [weak self] msg in
+                    Task { @MainActor in
+                        self?.transcribeStates[id] = .transcribing(msg)
+                    }
+                }
             )
-            transcribeStates[recording.id] = segments.isEmpty
-                ? .error("No speech detected")
-                : .done(segments)
+            if segments.isEmpty {
+                transcribeStates[id] = .error("No speech detected")
+            } else {
+                transcribeStates[id] = .done(segments)
+                saveMetadata(for: recording, segments: segments)  // 추가
+            }
+        } catch is CancellationError {
+            transcribeStates[id] = .error("Cancelled")
         } catch {
-            transcribeStates[recording.id] = .error(error.localizedDescription)
+            transcribeStates[id] = .error(error.localizedDescription)
         }
+    }
+
+    func cancelTranscribe(for recording: Recording) {
+        transcription.cancel()
+        transcribeStates[recording.id] = .error("Cancelled")
     }
 
     func clearTranscript(for recording: Recording) {
@@ -197,10 +221,11 @@ class MainViewModel {
             if !llm.isLoaded { try await llm.load() }
             var output = ""
             try await llm.summarize(text: fullText, language: language) { fullDecoded in
-                output = fullDecoded
+                output = fullDecoded  //
                 Task { @MainActor in self.summaryStates[recording.id] = .running(fullDecoded) }
             }
             summaryStates[recording.id] = .done(output)
+            saveSummary(output, for: recording)
         } catch {
             summaryStates[recording.id] = .error(error.localizedDescription)
         }
@@ -231,13 +256,15 @@ class MainViewModel {
             }
 
             switch status {
-            case .installed, .supported:
+            case .installed:
                 self.pendingTranslationTexts[id] = segments
                 self.translationStates[id] = .running("Translating…")
                 self.translationConfigs[id] = TranslationSession.Configuration(
                     source: source,
                     target: language.locale
                 )
+            case .supported:
+                self.translationStates[id] = .notDownloaded
             case .unsupported:
                 self.translationStates[id] = .error("This language pair is not supported.")
             @unknown default:
@@ -265,6 +292,55 @@ class MainViewModel {
         pendingTranslationTexts.removeValue(forKey: recording.id)
     }
 
+    // MARK: - SwiftData persistence
+
+    /// Upsert metadata for a recording
+    func saveMetadata(for recording: Recording, segments: [TranscriptSegment]) {
+        guard let context = modelContext else { return }
+        let filename = recording.filename
+        let existing = fetchMetadata(filename: filename, context: context)
+        let metadata = existing ?? RecordingMetadata(filename: filename, displayName: recording.formattedDate)
+        metadata.transcriptSegments = segments
+        metadata.detectedLanguage = segments.first?.detectedLanguage
+        if existing == nil { context.insert(metadata) }
+        try? context.save()
+    }
+
+    func saveSummary(_ summary: String, for recording: Recording) {
+        guard let context = modelContext else { return }
+        let metadata = fetchOrCreateMetadata(for: recording, context: context)
+        metadata.summaryText = summary
+        try? context.save()
+    }
+
+    func saveTranslation(_ text: String, languageCode: String, for recording: Recording) {
+        guard let context = modelContext else { return }
+        let metadata = fetchOrCreateMetadata(for: recording, context: context)
+        metadata.setTranslation(text, for: languageCode)
+        try? context.save()
+    }
+
+    func loadMetadata(for recording: Recording) -> RecordingMetadata? {
+        guard let context = modelContext else { return nil }
+        return fetchMetadata(filename: recording.filename, context: context)
+    }
+
+    private func fetchMetadata(filename: String, context: ModelContext) -> RecordingMetadata? {
+        let descriptor = FetchDescriptor<RecordingMetadata>(
+            predicate: #Predicate { $0.filename == filename }
+        )
+        return try? context.fetch(descriptor).first
+    }
+
+    private func fetchOrCreateMetadata(for recording: Recording, context: ModelContext) -> RecordingMetadata {
+        if let existing = fetchMetadata(filename: recording.filename, context: context) {
+            return existing
+        }
+        let new = RecordingMetadata(filename: recording.filename, displayName: recording.formattedDate)
+        context.insert(new)
+        return new
+    }
+
     // MARK: - Helpers
 
     /// Returns the detected language from the first transcribed segment.
@@ -279,5 +355,27 @@ class MainViewModel {
         let m = elapsedSeconds / 60
         let s = elapsedSeconds % 60
         return String(format: "%02d:%02d", m, s)
+    }
+    
+    func loadSavedTranscript(for recording: Recording) {
+        guard let metadata = loadMetadata(for: recording),
+              !metadata.transcriptSegments.isEmpty else { return }
+        transcribeStates[recording.id] = .done(metadata.transcriptSegments)
+        // 요약도 있으면 같이 로드
+        if let summary = metadata.summaryText {
+            summaryStates[recording.id] = .done(summary)
+        }
+        // 번역도 있으면 로드
+        if !metadata.translations.isEmpty {
+            // 첫 번째 번역 로드
+            if let (_, text) = metadata.translations.first {
+                translationStates[recording.id] = .done(text)
+            }
+        }
+    }
+
+    func hasSavedTranscript(for recording: Recording) -> Bool {
+        guard let metadata = loadMetadata(for: recording) else { return false }
+        return !metadata.transcriptSegments.isEmpty
     }
 }

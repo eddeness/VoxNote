@@ -1,9 +1,10 @@
 import SwiftUI
+import SwiftData
 
 struct MainView: View {
-
     @State private var vm = MainViewModel()
-
+    @Environment(\.modelContext) private var modelContext
+    
     var body: some View {
         VStack(spacing: 0) {
             toolbar
@@ -15,7 +16,10 @@ struct MainView: View {
 #if os(macOS)
         .frame(minWidth: 600, minHeight: 440)
 #endif
-        .onAppear { vm.onAppear() }
+        .onAppear {
+            vm.modelContext = modelContext
+            vm.onAppear()
+        }
     }
 
     // MARK: - Toolbar

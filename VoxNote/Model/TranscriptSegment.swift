@@ -1,12 +1,20 @@
 import Foundation
 
-struct TranscriptSegment: Identifiable, Equatable {
-    let id = UUID()
+struct TranscriptSegment: Identifiable, Equatable, Codable {
+    let id: UUID
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String
     var translatedText: String? = nil
-    var detectedLanguage: String? = nil  // BCP-47, e.g. "en", "ko"
+    var detectedLanguage: String? = nil
+
+    init(startTime: TimeInterval, endTime: TimeInterval, text: String, detectedLanguage: String? = nil) {
+        self.id = UUID()
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.detectedLanguage = detectedLanguage
+    }
 
     var srtStartTime: String { formatSRT(startTime) }
     var srtEndTime: String { formatSRT(endTime) }

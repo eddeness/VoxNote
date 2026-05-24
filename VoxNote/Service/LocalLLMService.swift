@@ -86,7 +86,7 @@ class LocalLLMService {
             let lmInput = try await context.processor.prepare(input: input)
             let _ = try MLXLMCommon.generate(
                 input: lmInput,
-                parameters: GenerateParameters(temperature: 0.6),
+                parameters: GenerateParameters(maxTokens: 1024, temperature: 0.6),
                 context: context
             ) { tokens in
                 let decoded = context.tokenizer.decode(tokens: tokens)

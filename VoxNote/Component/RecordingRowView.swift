@@ -9,8 +9,12 @@ struct RecordingRowView: View {
     let onDelete: () -> Void
 
     @State private var selectedSummaryLanguage = LocalLLMService.summaryLanguages[0]
-    @State private var selectedTranslationLanguage = TranslationLanguage.supported[1]
-    @State private var showDeleteConfirm = false
+    @State private var selectedTranslationLanguage = TranslationLanguage.supported[1] // English default
+
+    // Collapse state per section
+    @State private var isTranscriptExpanded = true
+    @State private var isSummaryExpanded = true
+    @State private var isTranslationExpanded = true
 
     private var isThisPlaying: Bool { player.playingID == recording.id && player.isPlaying }
     private var isThisLoaded: Bool { player.playingID == recording.id }
@@ -50,20 +54,12 @@ struct RecordingRowView: View {
                 Spacer()
                 transcribeButton
 
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
+                Button(role: .destructive) { onDelete() } label: {
                     Image(systemName: "trash")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .confirmationDialog("Delete this recording?", isPresented: $showDeleteConfirm) {
-                    Button("Delete", role: .destructive) { onDelete() }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This action cannot be undone.")
-                }
             }
 
             // Scrubber
@@ -79,8 +75,29 @@ struct RecordingRowView: View {
             // Transcript
             if let state = transcribeState {
                 Divider()
-                transcriptSection(state)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                // Transcript header with collapse toggle
+                HStack {
+                    Text("Transcript")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if case .done = state {
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                isTranscriptExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: isTranscriptExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if isTranscriptExpanded {
+                    transcriptSection(state)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
 
             // Summary + Translation actions
@@ -93,9 +110,7 @@ struct RecordingRowView: View {
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .animation(.spring(duration: 0.25), value: isThisLoaded)
-        .animation(.spring(duration: 0.3), value: hasTranscript)
-        .animation(.spring(duration: 0.3), value: summaryState != nil)
-        .animation(.spring(duration: 0.3), value: translationState != nil)
+        
         .translationTask(translationConfig) { session in
             do {
                 try await vm.performTranslation(for: recording.id, using: session)
@@ -114,11 +129,29 @@ struct RecordingRowView: View {
     private var transcribeButton: some View {
         switch transcribeState {
         case .none:
-            actionChip(label: "Transcribe", icon: "text.bubble", color: .accentColor) {
-                Task { await vm.transcribe(recording) }
+            if vm.hasSavedTranscript(for: recording) {
+                actionChip(label: "Load", icon: "arrow.down.circle", color: .green) {
+                    vm.loadSavedTranscript(for: recording)
+                }
+            } else {
+                actionChip(label: "Transcribe", icon: "text.bubble", color: .accentColor) {
+                    Task { await vm.transcribe(recording) }
+                }
+                .disabled(vm.isTranscribing)
+                .opacity(vm.isTranscribing ? 0.4 : 1)
             }
-        case .transcribing:
-            loadingChip("Transcribing…")
+        case .transcribing(let msg):
+            HStack(spacing: 6) {
+                loadingChip(msg)
+                Button {
+                    vm.cancelTranscribe(for: recording)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+            }
         case .done:
             actionChip(label: "Clear", icon: "xmark.circle", color: .secondary) {
                 vm.clearTranscript(for: recording)
@@ -135,28 +168,24 @@ struct RecordingRowView: View {
     @ViewBuilder
     private func transcriptSection(_ state: TranscribeState) -> some View {
         switch state {
-        case .transcribing:
+        case .transcribing(let msg):
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.7)
-                Text("Transcribing…").font(.caption).foregroundStyle(.secondary)
+                Text(msg).font(.caption).foregroundStyle(.secondary)
             }
         case .done(let segments):
-            ScrollView {
-                   VStack(alignment: .leading, spacing: 6) {
-                       ForEach(segments) { seg in
-                           VStack(alignment: .leading, spacing: 2) {
-                               Text("\(seg.srtStartTime) → \(seg.srtEndTime)")
-                                   .font(.caption.monospacedDigit())
-                                   .foregroundStyle(.secondary)
-                               Text(seg.text)
-                                   .font(.body)
-                           }
-                       }
-                   }
-                   .textSelection(.enabled)
-                   .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(segments) { seg in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(seg.srtStartTime) → \(seg.srtEndTime)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Text(seg.text)
+                            .font(.body)
+                            .textSelection(.enabled)
+                    }
+                }
             }
-            .frame(maxHeight: 600)
         case .error(let msg):
             Text(msg).font(.caption).foregroundStyle(.red)
         }
@@ -173,6 +202,18 @@ struct RecordingRowView: View {
                     Text("Summary")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    if case .done = summaryState {
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                isSummaryExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     Picker("", selection: $selectedSummaryLanguage) {
                         ForEach(LocalLLMService.summaryLanguages) { lang in
@@ -202,7 +243,7 @@ struct RecordingRowView: View {
                         }
                     }
                 }
-                if let state = summaryState { llmResultView(state) }
+                if isSummaryExpanded, let state = summaryState { llmResultView(state) }
             }
 
             Divider()
@@ -213,6 +254,18 @@ struct RecordingRowView: View {
                     Text("Translation")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    if case .done = translationState {
+                        Button {
+                            withAnimation(.spring(duration: 0.25)) {
+                                isTranslationExpanded.toggle()
+                            }
+                        } label: {
+                            Image(systemName: isTranslationExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
 
                     Picker("", selection: $selectedTranslationLanguage) {
                         ForEach(TranslationLanguage.supported) { lang in
@@ -244,7 +297,7 @@ struct RecordingRowView: View {
                         }
                     }
                 }
-                if let state = translationState { translationResultView(state) }
+                if isTranslationExpanded, let state = translationState { translationResultView(state) }
             }
         }
     }
