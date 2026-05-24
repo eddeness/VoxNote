@@ -9,12 +9,13 @@ struct RecordingRowView: View {
     let onDelete: () -> Void
 
     @State private var selectedSummaryLanguage = LocalLLMService.summaryLanguages[0]
-    @State private var selectedTranslationLanguage = TranslationLanguage.supported[1] // English default
+    @State private var selectedTranslationLanguage = TranslationLanguage.supported[1]
 
     // Collapse state per section
     @State private var isTranscriptExpanded = true
     @State private var isSummaryExpanded = true
     @State private var isTranslationExpanded = true
+    @State private var showDeleteConfirm = false
 
     private var isThisPlaying: Bool { player.playingID == recording.id && player.isPlaying }
     private var isThisLoaded: Bool { player.playingID == recording.id }
@@ -54,12 +55,20 @@ struct RecordingRowView: View {
                 Spacer()
                 transcribeButton
 
-                Button(role: .destructive) { onDelete() } label: {
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
                     Image(systemName: "trash")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .confirmationDialog("Delete this recording?", isPresented: $showDeleteConfirm) {
+                    Button("Delete", role: .destructive) { onDelete() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This action cannot be undone.")
+                }
             }
 
             // Scrubber
@@ -69,18 +78,16 @@ struct RecordingRowView: View {
                     in: 0...max(player.duration, 0.01)
                 )
                 .tint(.accentColor)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // Transcript
             if let state = transcribeState {
                 Divider()
-                // Transcript header with collapse toggle
-                HStack {
+                HStack(spacing: 8) {
                     Text("Transcript")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    if case .done = state {
+                    if case .done(let segments) = state {
                         Button {
                             withAnimation(.spring(duration: 0.25)) {
                                 isTranscriptExpanded.toggle()
@@ -91,12 +98,23 @@ struct RecordingRowView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        
+                        // Share transcript
+                        ShareLink(
+                            item: segments.map { "[\($0.srtStartTime) → \($0.srtEndTime)]\n\($0.text)" }.joined(separator: "\n\n"),
+                            subject: Text("Transcript"),
+                            message: Text(recording.formattedDate)
+                        ) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
 
                 if isTranscriptExpanded {
                     transcriptSection(state)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
 
@@ -104,13 +122,10 @@ struct RecordingRowView: View {
             if hasTranscript {
                 Divider()
                 llmActionsSection
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .animation(.spring(duration: 0.25), value: isThisLoaded)
-        
         .translationTask(translationConfig) { session in
             do {
                 try await vm.performTranslation(for: recording.id, using: session)
@@ -174,18 +189,23 @@ struct RecordingRowView: View {
                 Text(msg).font(.caption).foregroundStyle(.secondary)
             }
         case .done(let segments):
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(segments) { seg in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(seg.srtStartTime) → \(seg.srtEndTime)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Text(seg.text)
-                            .font(.body)
-                            .textSelection(.enabled)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(segments) { seg in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(seg.srtStartTime) → \(seg.srtEndTime)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(seg.text)
+                                .font(.body)
+                        }
                     }
                 }
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 300)
+            .scrollIndicators(.never)
         case .error(let msg):
             Text(msg).font(.caption).foregroundStyle(.red)
         }
@@ -202,15 +222,18 @@ struct RecordingRowView: View {
                     Text("Summary")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    if case .done = summaryState {
+                    if case .done(let text) = summaryState {
                         Button {
-                            withAnimation(.spring(duration: 0.25)) {
-                                isSummaryExpanded.toggle()
-                            }
+                            withAnimation(.spring(duration: 0.25)) { isSummaryExpanded.toggle() }
                         } label: {
                             Image(systemName: isSummaryExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        ShareLink(item: text) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -220,9 +243,7 @@ struct RecordingRowView: View {
                             Text(lang.label).tag(lang)
                         }
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .font(.caption)
+                    .labelsHidden().pickerStyle(.menu).font(.caption)
 
                     Spacer()
 
@@ -254,15 +275,18 @@ struct RecordingRowView: View {
                     Text("Translation")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    if case .done = translationState {
+                    if case .done(let text) = translationState {
                         Button {
-                            withAnimation(.spring(duration: 0.25)) {
-                                isTranslationExpanded.toggle()
-                            }
+                            withAnimation(.spring(duration: 0.25)) { isTranslationExpanded.toggle() }
                         } label: {
                             Image(systemName: isTranslationExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        ShareLink(item: text) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
                     }
@@ -272,9 +296,7 @@ struct RecordingRowView: View {
                             Text(lang.label).tag(lang)
                         }
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .font(.caption)
+                    .labelsHidden().pickerStyle(.menu).font(.caption)
 
                     Spacer()
 
