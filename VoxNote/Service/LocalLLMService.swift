@@ -45,8 +45,6 @@ class LocalLLMService {
         guard !isLoaded else { return }
         loadStatus = "Loading LLM…"
 
-        MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-
         let config = selectModel()
         modelContainer = try await LLMModelFactory.shared.loadContainer(
             configuration: config
@@ -89,6 +87,9 @@ class LocalLLMService {
                 parameters: GenerateParameters(maxTokens: 1024, temperature: 0.6),
                 context: context
             ) { tokens in
+                
+                if Task.isCancelled { return .stop }
+                
                 let decoded = context.tokenizer.decode(tokens: tokens)
                 Task { @MainActor in onToken(decoded) }
                 return .more

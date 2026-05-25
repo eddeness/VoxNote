@@ -22,7 +22,6 @@ struct RecordingRowView: View {
     private var transcribeState: TranscribeState? { vm.transcribeStates[recording.id] }
     private var summaryState: LLMTaskState? { vm.summaryStates[recording.id] }
     private var translationState: LLMTaskState? { vm.translationStates[recording.id] }
-    private var translationConfig: TranslationSession.Configuration? { vm.translationConfigs[recording.id] }
     private var hasTranscript: Bool {
         if case .done = transcribeState { return true }
         return false
@@ -126,13 +125,13 @@ struct RecordingRowView: View {
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .translationTask(translationConfig) { session in
+        .translationTask(vm.translationState(for: recording.id).config) { session in
             do {
                 try await vm.performTranslation(for: recording.id, using: session)
             } catch {
                 await MainActor.run {
                     vm.translationStates[recording.id] = .error("Translation unavailable. Please allow language download and try again.")
-                    vm.translationConfigs.removeValue(forKey: recording.id)
+                    vm.translationState(for: recording.id).config = nil
                 }
             }
         }
@@ -356,7 +355,14 @@ struct RecordingRowView: View {
         case .running(let text):
             llmResultView(.running(text))
         case .done(let text):
-            llmResultView(.done(text))
+            ScrollView {
+                    Text(text)
+                        .font(.body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 300)
+                .scrollIndicators(.never)
         case .notDownloaded:
             Button {
                 let detectedLang = vm.detectedLanguage(for: recording)

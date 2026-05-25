@@ -4,13 +4,13 @@ import Foundation
 
 /// Wraps WhisperKit for audio-file transcription.
 /// Only one transcription task runs at a time — starting a new one cancels the previous.
+@MainActor
 class TranscriptionService {
 
     private var pipe: WhisperKit?
     private var currentTask: Task<[TranscriptSegment], Error>?
 
     // MARK: - Setup
-
     func load(onProgress: @escaping (String) -> Void) async throws {
         let model = selectModel()
         onProgress("Loading model…")
@@ -32,7 +32,6 @@ class TranscriptionService {
     }
 
     // MARK: - Transcription
-
     func transcribe(
         audioURL: URL,
         onProgress: @escaping (String) -> Void
@@ -40,12 +39,18 @@ class TranscriptionService {
         // Cancel any existing transcription
         currentTask?.cancel()
 
-        let task = Task {
-            try await self.run(audioURL: audioURL, onProgress: onProgress)
+        let task = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.run(audioURL: audioURL, onProgress: onProgress)
         }
         currentTask = task
 
-        defer { currentTask = nil }
+        defer {
+            if currentTask == task {
+                currentTask = nil
+            }
+        }
+        
         return try await task.value
     }
 
@@ -53,9 +58,12 @@ class TranscriptionService {
         currentTask?.cancel()
         currentTask = nil
     }
+    
+    deinit {
+        currentTask?.cancel()
+    }
 
     // MARK: - Internal
-
     private func run(
         audioURL: URL,
         onProgress: @escaping (String) -> Void
@@ -65,19 +73,15 @@ class TranscriptionService {
         onProgress("Transcribing… 0%")
 
         let asset = AVURLAsset(url: audioURL)
-        let totalDuration = CMTimeGetSeconds(asset.duration)
+        let duration = try await asset.load(.duration)
+        let totalDuration = CMTimeGetSeconds(duration)
         let options = DecodingOptions(wordTimestamps: true)
-
-        // Local flag — Task.isCancelled doesn't propagate into sync WhisperKit callback
-        var cancelled = false
 
         let results = try await pipe.transcribe(
             audioPath: audioURL.path,
             decodeOptions: options
         ) { progress in
-            // Sync check of Task cancellation via local flag
-            if Task.isCancelled { cancelled = true }
-            if cancelled { return false }
+            if Task.isCancelled { return false }
 
             if totalDuration > 0 {
                 let estimatedSeconds = Double(progress.windowId) * 30.0
@@ -87,7 +91,6 @@ class TranscriptionService {
             return true
         }
 
-        if cancelled { throw CancellationError() }
         try Task.checkCancellation()
 
         let detectedLanguage = results.first?.language
@@ -117,7 +120,6 @@ class TranscriptionService {
     }
 
     // MARK: - Model selection
-
     private func selectModel() -> String {
         let ramGB = ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024)
 #if os(macOS)

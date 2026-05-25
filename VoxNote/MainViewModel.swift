@@ -24,6 +24,11 @@ enum LLMTaskState: Equatable {
 }
 
 @Observable
+class TranslationState {
+    var config: TranslationSession.Configuration?
+}
+
+@Observable
 @MainActor
 class MainViewModel {
 
@@ -37,8 +42,8 @@ class MainViewModel {
     var transcribeStates: [UUID: TranscribeState] = [:]
     var summaryStates: [UUID: LLMTaskState] = [:]
 
-    // Translation: configuration trigger per recording (SwiftUI .translationTask 용)
-    var translationConfigs: [UUID: TranslationSession.Configuration] = [:]
+    // Translation: configuration trigger per recording
+    var translationStateObjects: [UUID: TranslationState] = [:]
     var translationStates: [UUID: LLMTaskState] = [:]
     var pendingTranslationTexts: [UUID: [TranscriptSegment]] = [:]
 
@@ -70,7 +75,9 @@ class MainViewModel {
         whisperStatus = "Loading model…"
         do {
             try await transcription.load { [weak self] msg in
-                Task { @MainActor in self?.whisperStatus = msg }
+                Task { @MainActor [weak self] in
+                    self?.whisperStatus = msg
+                }
             }
             isWhisperLoaded = true
             whisperStatus = "Model ready"
@@ -98,8 +105,10 @@ class MainViewModel {
                 appState = .recording
                 elapsedSeconds = 0
                 statusMessage = "Recording…"
-                recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                    Task { @MainActor in self?.elapsedSeconds += 1 }
+                recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                    Task { @MainActor [weak self] in
+                        self?.elapsedSeconds += 1
+                    }
                 }
             } catch {
                 appState = .error(error.localizedDescription)
@@ -128,7 +137,7 @@ class MainViewModel {
         transcribeStates.removeValue(forKey: recording.id)
         summaryStates.removeValue(forKey: recording.id)
         translationStates.removeValue(forKey: recording.id)
-        translationConfigs.removeValue(forKey: recording.id)
+        translationStateObjects.removeValue(forKey: recording.id)
         pendingTranslationTexts.removeValue(forKey: recording.id)
         try? AudioCaptureService.delete(recording)
         loadRecordings()
@@ -139,16 +148,15 @@ class MainViewModel {
         transcribeStates.removeAll()
         summaryStates.removeAll()
         translationStates.removeAll()
-        translationConfigs.removeAll()
+        translationStateObjects.removeAll()
         pendingTranslationTexts.removeAll()
         recordings.forEach { try? AudioCaptureService.delete($0) }
         loadRecordings()
     }
 
     // MARK: - Transcription
-    
-    
     var isProcessing: Bool {
+        !isWhisperLoaded && whisperStatus != "Model not loaded" ||
         transcribeStates.values.contains {
             if case .transcribing = $0 { return true }
             return false
@@ -180,7 +188,7 @@ class MainViewModel {
             let segments = try await transcription.transcribe(
                 audioURL: recording.url,
                 onProgress: { [weak self] msg in
-                    Task { @MainActor in
+                    Task { @MainActor [weak self] in
                         self?.transcribeStates[id] = .transcribing(msg)
                     }
                 }
@@ -189,7 +197,7 @@ class MainViewModel {
                 transcribeStates[id] = .error("No speech detected")
             } else {
                 transcribeStates[id] = .done(segments)
-                saveMetadata(for: recording, segments: segments)  // 추가
+                saveMetadata(for: recording, segments: segments)
             }
         } catch is CancellationError {
             transcribeStates[id] = .error("Cancelled")
@@ -207,18 +215,23 @@ class MainViewModel {
         transcribeStates.removeValue(forKey: recording.id)
         summaryStates.removeValue(forKey: recording.id)
         translationStates.removeValue(forKey: recording.id)
-        translationConfigs.removeValue(forKey: recording.id)
+//        translationConfigs.removeValue(forKey: recording.id)
+        translationStateObjects.removeValue(forKey: recording.id)
     }
 
     // MARK: - Summarization (MLX LLM)
-
     func summarize(_ recording: Recording, language: LocalLLMService.SummaryLanguage) async {
         guard case .done(let segments) = transcribeStates[recording.id] else { return }
         let fullText = segments.map(\.text).joined(separator: " ")
 
         summaryStates[recording.id] = .running("")
         do {
-            if !llm.isLoaded { try await llm.load() }
+            if !llm.isLoaded {
+                summaryStates[recording.id] = .running("Downloading model…")
+                try await llm.load()
+                summaryStates[recording.id] = .running("")
+            }
+            
             var output = ""
             try await llm.summarize(text: fullText, language: language) { fullDecoded in
                 output = fullDecoded  //
@@ -236,8 +249,6 @@ class MainViewModel {
     }
 
     // MARK: - Translation (Apple Translation API via .translationTask)
-
-    /// .translationTask modifier가 감지하도록 configuration 세팅
     func triggerTranslation(_ recording: Recording, from sourceLang: String?, to language: TranslationLanguage) {
         guard case .done(let segments) = transcribeStates[recording.id] else { return }
 
@@ -251,20 +262,22 @@ class MainViewModel {
             if let source {
                 status = await availability.status(from: source, to: language.locale)
             } else {
-                // Source unknown — assume supported, let translationTask handle it
                 status = .supported
             }
 
             switch status {
-            case .installed:
+            case .installed, .supported:
                 self.pendingTranslationTexts[id] = segments
                 self.translationStates[id] = .running("Translating…")
-                self.translationConfigs[id] = TranslationSession.Configuration(
+
+//                self.translationConfigs.removeValue(forKey: id)
+                let state = self.translationState(for: id)
+                state.config = nil
+                try? await Task.sleep(for: .milliseconds(100))
+                state.config = TranslationSession.Configuration(
                     source: source,
                     target: language.locale
                 )
-            case .supported:
-                self.translationStates[id] = .notDownloaded
             case .unsupported:
                 self.translationStates[id] = .error("This language pair is not supported.")
             @unknown default:
@@ -272,7 +285,7 @@ class MainViewModel {
             }
         }
     }
-    /// .translationTask 클로저에서 호출 — 실제 번역 수행
+    
     func performTranslation(for recordingID: UUID, using session: TranslationSession) async throws {
         guard let segments = pendingTranslationTexts[recordingID], !segments.isEmpty else { return }
 
@@ -288,7 +301,7 @@ class MainViewModel {
 
     func clearTranslation(for recording: Recording) {
         translationStates.removeValue(forKey: recording.id)
-        translationConfigs.removeValue(forKey: recording.id)
+        translationStateObjects.removeValue(forKey: recording.id)
         pendingTranslationTexts.removeValue(forKey: recording.id)
     }
 
@@ -361,13 +374,10 @@ class MainViewModel {
         guard let metadata = loadMetadata(for: recording),
               !metadata.transcriptSegments.isEmpty else { return }
         transcribeStates[recording.id] = .done(metadata.transcriptSegments)
-        // 요약도 있으면 같이 로드
         if let summary = metadata.summaryText {
             summaryStates[recording.id] = .done(summary)
         }
-        // 번역도 있으면 로드
         if !metadata.translations.isEmpty {
-            // 첫 번째 번역 로드
             if let (_, text) = metadata.translations.first {
                 translationStates[recording.id] = .done(text)
             }
@@ -377,5 +387,12 @@ class MainViewModel {
     func hasSavedTranscript(for recording: Recording) -> Bool {
         guard let metadata = loadMetadata(for: recording) else { return false }
         return !metadata.transcriptSegments.isEmpty
+    }
+    
+    func translationState(for id: UUID) -> TranslationState {
+        if let existing = translationStateObjects[id] { return existing }
+        let new = TranslationState()
+        translationStateObjects[id] = new
+        return new
     }
 }
