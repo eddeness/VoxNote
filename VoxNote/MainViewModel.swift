@@ -70,13 +70,14 @@ class MainViewModel {
 
     // MARK: - Whisper model
 
-    func loadWhisperModel() async {
+    func loadWhisperModel(onProgress: ((String) -> Void)? = nil) async {
         guard !isWhisperLoaded else { return }
         whisperStatus = "Loading model…"
         do {
             try await transcription.load { [weak self] msg in
                 Task { @MainActor [weak self] in
                     self?.whisperStatus = msg
+                    onProgress?(msg)
                 }
             }
             isWhisperLoaded = true
@@ -179,10 +180,22 @@ class MainViewModel {
     }
 
     func transcribe(_ recording: Recording) async {
-        if !isWhisperLoaded { await loadWhisperModel() }
-        guard isWhisperLoaded else { return }
-
         let id = recording.id
+        
+        if !isWhisperLoaded {
+            transcribeStates[id] = .transcribing("Loading Model...")
+            await loadWhisperModel { [weak self] msg in
+                Task { @MainActor [weak self] in
+                    self?.transcribeStates[id] = .transcribing(msg)
+                }
+            }
+        }
+        
+        guard isWhisperLoaded else {
+            transcribeStates[id] = .error("Failed to load model")
+            return
+        }
+
         transcribeStates[id] = .transcribing("Transcribing… 0%")
         do {
             let segments = try await transcription.transcribe(
@@ -227,9 +240,16 @@ class MainViewModel {
         summaryStates[recording.id] = .running("")
         do {
             if !llm.isLoaded {
-                summaryStates[recording.id] = .running("Downloading model…")
+                let id = recording.id
+                let statusTask = Task { [weak self] in
+                    while !(self?.llm.isLoaded ?? true) {
+                        self?.summaryStates[id] = .running(self?.llm.loadStatus ?? "")
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                }
                 try await llm.load()
-                summaryStates[recording.id] = .running("")
+                statusTask.cancel()
+                summaryStates[id] = .running("")
             }
             
             var output = ""

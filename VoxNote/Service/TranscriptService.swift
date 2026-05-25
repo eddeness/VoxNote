@@ -13,6 +13,16 @@ class TranscriptionService {
     // MARK: - Setup
     func load(onProgress: @escaping (String) -> Void) async throws {
         let model = selectModel()
+        
+        onProgress("Downloading model… 0%")
+        _ = try await WhisperKit.download(
+            variant: model,
+            progressCallback: { progress in
+                let pct = Int(progress.fractionCompleted * 100)
+                Task { @MainActor in onProgress("Downloading model… \(pct)%") }
+            }
+        )
+        
         onProgress("Loading model…")
 
         pipe = try await WhisperKit(

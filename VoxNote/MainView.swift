@@ -32,14 +32,19 @@ struct MainView: View {
 
             // Whisper model status
             if !vm.isWhisperLoaded {
-                Button {
-                    Task { await vm.loadWhisperModel() }
-                } label: {
-                    Label(vm.whisperStatus, systemImage: "arrow.down.circle")
+                HStack(spacing: 6) {
+                    if vm.whisperStatus.contains("%") {
+                        ProgressView(value: Double(vm.whisperStatus.filter("0123456789".contains)) ?? 0, total: 100)
+                            .progressViewStyle(.linear)
+                            .frame(width: 80)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    }
+                    Text(vm.whisperStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal)
