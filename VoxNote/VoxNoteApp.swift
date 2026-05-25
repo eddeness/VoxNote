@@ -1,10 +1,3 @@
-//
-//  VoxNoteApp.swift
-//  VoxNote
-//
-//  Created by 승박 on 5/9/26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,7 +5,7 @@ import SwiftData
 struct VoxNoteApp: App {
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("VoxNoteAI") {
             MainView()
                 .modelContainer(for: [RecordingMetadata.self, RecordingFolder.self])
         }
