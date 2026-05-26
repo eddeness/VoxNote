@@ -20,6 +20,20 @@ struct MainView: View {
             vm.modelContext = modelContext
             vm.onAppear()
         }
+        .alert("Microphone Access Required", isPresented: $vm.showMicrophonePermissionAlert) {
+            Button("Open Settings") {
+        #if os(macOS)
+                NSWorkspace.shared.open(
+                    URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+                )
+        #else
+                UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+        #endif
+            }
+            Button("Cancel", role: .cancel) { vm.appState = .ready }
+        } message: {
+            Text("VoxNoteAI needs microphone access to record audio.")
+        }
     }
 
     // MARK: - Toolbar

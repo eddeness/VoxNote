@@ -59,6 +59,7 @@ class MainViewModel {
     // MARK: - Whisper model state
     var isWhisperLoaded = false
     var whisperStatus = "Model not loaded"
+    var showMicrophonePermissionAlert = false
 
     private var recordingTimer: Timer?
 
@@ -111,9 +112,13 @@ class MainViewModel {
                         self?.elapsedSeconds += 1
                     }
                 }
+            } catch let error as RecordingError {
+                if error == .permissionDenied {
+                    showMicrophonePermissionAlert = true
+                }
+                appState = .error(error.localizedDescription)
             } catch {
                 appState = .error(error.localizedDescription)
-                statusMessage = error.localizedDescription
             }
         }
     }

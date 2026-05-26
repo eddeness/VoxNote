@@ -30,7 +30,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		4EC55FE72FAFFD8000BD03B0 /* VoxNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoxNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4EC55FE72FAFFD8000BD03B0 /* VoxNoteAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoxNoteAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EC55FF62FAFFD8100BD03B0 /* VoxNoteTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VoxNoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EC560002FAFFD8100BD03B0 /* VoxNoteUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VoxNoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -94,7 +94,7 @@
 		4EC55FE82FAFFD8000BD03B0 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				4EC55FE72FAFFD8000BD03B0 /* VoxNote.app */,
+				4EC55FE72FAFFD8000BD03B0 /* VoxNoteAI.app */,
 				4EC55FF62FAFFD8100BD03B0 /* VoxNoteTests.xctest */,
 				4EC560002FAFFD8100BD03B0 /* VoxNoteUITests.xctest */,
 			);
@@ -126,7 +126,7 @@
 				4EC5605C2FB131C100BD03B0 /* MLXLMCommon */,
 			);
 			productName = VoxNote;
-			productReference = 4EC55FE72FAFFD8000BD03B0 /* VoxNote.app */;
+			productReference = 4EC55FE72FAFFD8000BD03B0 /* VoxNoteAI.app */;
 			productType = "com.apple.product-type.application";
 		};
 		4EC55FF52FAFFD8100BD03B0 /* VoxNoteTests */ = {
@@ -407,7 +407,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = ARVJUB76TL;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -445,7 +445,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = seungpark.VoxNote;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = VoxNoteAI;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -467,7 +467,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = ARVJUB76TL;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -505,7 +505,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = seungpark.VoxNote;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = VoxNoteAI;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

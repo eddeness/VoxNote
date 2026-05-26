@@ -1,6 +1,18 @@
 import AVFoundation
 import Observation
 
+enum RecordingError: LocalizedError {
+    case permissionDenied
+    var errorDescription: String? { "Microphone access is required to record audio." }
+    var recoverySuggestion: String? {
+#if os(macOS)
+        "Please enable microphone access in System Settings → Privacy & Security → Microphone."
+#else
+        "Please enable microphone access in Settings → VoxNoteAI → Microphone."
+#endif
+    }
+}
+
 /// Handles microphone recording via AVAudioEngine.
 /// Saves recordings permanently to the app's Documents/Recordings directory.
 /// Platform differences (AVAudioSession) are isolated here.
@@ -53,17 +65,17 @@ class AudioCaptureService {
     
     
     private func requestPermission() async throws {
-        let granted = await AVCaptureDevice.requestAccess(for: .audio)
-        if !granted {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
+        case .authorized:
+            return
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            if !granted { throw RecordingError.permissionDenied }
+        case .denied, .restricted:
             throw RecordingError.permissionDenied
-        }
-    }
-
-    
-    enum RecordingError: LocalizedError {
-        case permissionDenied
-        var errorDescription: String? {
-            "You do not have microphone access. Please allow it in System Settings > Privacy > Microphone."
+        @unknown default:
+            throw RecordingError.permissionDenied
         }
     }
     
