@@ -9,36 +9,60 @@ class TranscriptionService {
 
     private var pipe: WhisperKit?
     private var currentTask: Task<[TranscriptSegment], Error>?
+    private var setupTask: Task<Void, Error>?
 
     // MARK: - Setup
     func load(onProgress: @escaping (String) -> Void) async throws {
-        let model = selectModel()
+        setupTask?.cancel()
         
-        onProgress("Downloading model… 0%")
-        _ = try await WhisperKit.download(
-            variant: model,
-            progressCallback: { progress in
-                let pct = Int(progress.fractionCompleted * 100)
-                Task { @MainActor in onProgress("Downloading model… \(pct)%") }
-            }
-        )
-        
-        onProgress("Loading model…")
-
-        pipe = try await WhisperKit(
-            WhisperKitConfig(
-                model: model,
-                downloadBase: nil,
-                modelRepo: "argmaxinc/whisperkit-coreml",
-                verbose: false,
-                logLevel: .none,
-                prewarm: false,
-                load: true,
-                download: true
+        let task = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            let model = self.selectModel()
+            
+            onProgress("Preparing model…")
+            
+            _ = try await WhisperKit.download(
+                variant: model,
+                progressCallback: { progress in
+                    if Task.isCancelled { return }
+                    
+                    let pct = Int(progress.fractionCompleted * 100)
+                    if pct < 100 {
+                        Task { @MainActor in onProgress("Downloading model… \(pct)%") }
+                    }
+                }
             )
-        )
+            
+            try Task.checkCancellation()
+            
+            onProgress("Loading model…")
 
-        onProgress("Model ready")
+            self.pipe = try await WhisperKit(
+                WhisperKitConfig(
+                    model: model,
+                    downloadBase: nil,
+                    modelRepo: "argmaxinc/whisperkit-coreml",
+                    verbose: false,
+                    logLevel: .none,
+                    prewarm: false,
+                    load: true,
+                    download: true
+                )
+            )
+
+            try Task.checkCancellation()
+            onProgress("Model ready")
+        }
+        
+        setupTask = task
+        
+        defer {
+            if setupTask == task {
+                setupTask = nil
+            }
+        }
+        
+        try await task.value
     }
 
     // MARK: - Transcription
@@ -67,10 +91,14 @@ class TranscriptionService {
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
+        
+        setupTask?.cancel()
+        setupTask = nil
     }
     
     deinit {
         currentTask?.cancel()
+        setupTask?.cancel()
     }
 
     // MARK: - Internal

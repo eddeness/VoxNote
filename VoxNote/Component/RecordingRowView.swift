@@ -54,19 +54,23 @@ struct RecordingRowView: View {
                 Spacer()
                 transcribeButton
 
-                Button(role: .destructive) {
-                    showDeleteConfirm = true
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .confirmationDialog("Delete this recording?", isPresented: $showDeleteConfirm) {
-                    Button("Delete", role: .destructive) { onDelete() }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("This action cannot be undone.")
+                if case .transcribing = transcribeState {
+                    
+                } else {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog("Delete this recording?", isPresented: $showDeleteConfirm) {
+                        Button("Delete", role: .destructive) { onDelete() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This action cannot be undone.")
+                    }
                 }
             }
 
@@ -157,14 +161,16 @@ struct RecordingRowView: View {
         case .transcribing(let msg):
             HStack(spacing: 6) {
                 loadingChip(msg)
-                Button {
-                    vm.cancelTranscribe(for: recording)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
+                if !msg.lowercased().hasPrefix("preparing"), !msg.lowercased().hasPrefix("loading") {
+                    Button {
+                        vm.cancelTranscribe(for: recording)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         case .done:
             actionChip(label: "Clear", icon: "xmark.circle", color: .secondary) {
