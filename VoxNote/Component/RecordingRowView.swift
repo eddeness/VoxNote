@@ -3,7 +3,7 @@ import Translation
 
 struct RecordingRowView: View {
 
-    let recording: Recording
+    let item: RecordingItem
     var player: AudioPlayerService
     var vm: MainViewModel
     let onDelete: () -> Void
@@ -11,12 +11,13 @@ struct RecordingRowView: View {
     @State private var selectedSummaryLanguage = LocalLLMService.summaryLanguages[0]
     @State private var selectedTranslationLanguage = TranslationLanguage.supported[1]
 
-    // Collapse state per section
     @State private var isTranscriptExpanded = true
     @State private var isSummaryExpanded = true
     @State private var isTranslationExpanded = true
     @State private var showDeleteConfirm = false
     @State private var showRenameSheet = false
+
+    private var recording: Recording { item.recording }
 
     private var isThisPlaying: Bool { player.playingID == recording.id && player.isPlaying }
     private var isThisLoaded: Bool { player.playingID == recording.id }
@@ -30,7 +31,6 @@ struct RecordingRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Top row
             HStack(spacing: 12) {
                 Button {
                     player.play(recording: recording)
@@ -43,7 +43,7 @@ struct RecordingRowView: View {
                 .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(vm.displayName(for: recording))
+                    Text(item.displayName)
                         .font(.subheadline.weight(.medium))
                     Text(isThisLoaded
                          ? player.formattedCurrentTime + " / " + recording.formattedDuration
@@ -58,7 +58,6 @@ struct RecordingRowView: View {
                 if case .transcribing = transcribeState {
 
                 } else {
-                    // Rename button
                     Button {
                         showRenameSheet = true
                     } label: {
@@ -85,7 +84,6 @@ struct RecordingRowView: View {
                 }
             }
 
-            // Scrubber
             if isThisLoaded {
                 Slider(
                     value: Binding(get: { player.currentTime }, set: { player.seek(to: $0) }),
@@ -94,7 +92,6 @@ struct RecordingRowView: View {
                 .tint(.accentColor)
             }
 
-            // Transcript
             if let state = transcribeState {
                 Divider()
                 HStack(spacing: 8) {
@@ -116,7 +113,7 @@ struct RecordingRowView: View {
                         ShareLink(
                             item: segments.map { "[\($0.srtStartTime) → \($0.srtEndTime)]\n\($0.text)" }.joined(separator: "\n\n"),
                             subject: Text("Transcript"),
-                            message: Text(vm.displayName(for: recording))
+                            message: Text(item.displayName)
                         ) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.caption)
@@ -131,7 +128,6 @@ struct RecordingRowView: View {
                 }
             }
 
-            // Summary + Translation actions
             if hasTranscript {
                 Divider()
                 llmActionsSection
@@ -153,7 +149,7 @@ struct RecordingRowView: View {
         .sheet(isPresented: $showRenameSheet) {
             RenameSheet(
                 title: "Rename Recording",
-                initialName: vm.displayName(for: recording),
+                initialName: item.displayName,
                 onSave: { name in
                     _ = vm.renameRecording(recording, to: name)
                     showRenameSheet = false
@@ -162,8 +158,6 @@ struct RecordingRowView: View {
             )
         }
     }
-
-    // MARK: - Transcribe button
 
     @ViewBuilder
     private var transcribeButton: some View {
@@ -205,8 +199,6 @@ struct RecordingRowView: View {
         }
     }
 
-    // MARK: - Transcript section
-
     @ViewBuilder
     private func transcriptSection(_ state: TranscribeState) -> some View {
         switch state {
@@ -238,12 +230,8 @@ struct RecordingRowView: View {
         }
     }
 
-    // MARK: - LLM actions
-
     private var llmActionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-
-            // Summary
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text("Summary")
@@ -296,7 +284,6 @@ struct RecordingRowView: View {
 
             Divider()
 
-            // Translation
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text("Translation")
@@ -350,8 +337,6 @@ struct RecordingRowView: View {
             }
         }
     }
-
-    // MARK: - Reusable views
 
     @ViewBuilder
     private func llmResultView(_ state: LLMTaskState) -> some View {

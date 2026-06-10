@@ -35,6 +35,7 @@ class MainViewModel {
     // MARK: - App state
     var appState: AppState = .ready
     var recordings: [Recording] = []
+    var allMetadata: [RecordingMetadata] = []
     var statusMessage = "Ready"
     var elapsedSeconds: Int = 0
 
@@ -73,14 +74,31 @@ class MainViewModel {
     }
 
     // MARK: - Folder
+
     var visibleFolders: [RecordingFolder] {
         folders.filter { $0.parent?.id == currentFolder?.id }
     }
 
-    var visibleRecordings: [Recording] {
+    var visibleRecordingItems: [RecordingItem] {
         let folderID = currentFolder?.id
-        return recordings.filter { rec in
-            loadMetadata(for: rec)?.folder?.id == folderID
+        return recordings.compactMap { rec in
+            let metadata = allMetadata.first { $0.filename == rec.filename }
+            guard metadata?.folder?.id == folderID else {
+                // 메타데이터 없으면 루트 폴더로 간주
+                if metadata == nil && folderID == nil {
+                    return RecordingItem(
+                        recording: rec,
+                        displayName: rec.formattedDate,
+                        folder: nil
+                    )
+                }
+                return nil
+            }
+            return RecordingItem(
+                recording: rec,
+                displayName: metadata?.displayName ?? rec.formattedDate,
+                folder: metadata?.folder
+            )
         }
     }
 
@@ -218,6 +236,14 @@ class MainViewModel {
         translationStates.removeValue(forKey: recording.id)
         translationStateObjects.removeValue(forKey: recording.id)
         pendingTranslationTexts.removeValue(forKey: recording.id)
+
+        // SwiftData metadata도 삭제
+        if let context = modelContext,
+           let metadata = allMetadata.first(where: { $0.filename == recording.filename }) {
+            context.delete(metadata)
+            try? context.save()
+        }
+
         try? AudioCaptureService.delete(recording)
         loadRecordings()
     }
@@ -234,13 +260,13 @@ class MainViewModel {
     }
 
     // MARK: - Recording rename
+
     func renameRecording(_ recording: Recording, to newName: String) -> Bool {
         guard NameValidator.isValid(newName) else { return false }
         guard let context = modelContext else { return false }
         let metadata = fetchOrCreateMetadata(for: recording, context: context)
         metadata.displayName = newName.trimmingCharacters(in: .whitespaces)
         try? context.save()
-        loadRecordings()  // 추가 — recordings 배열 다시 로드해서 SwiftUI 트리거
         return true
     }
 
@@ -319,16 +345,15 @@ class MainViewModel {
         translationStates.removeValue(forKey: recording.id)
         translationStateObjects.removeValue(forKey: recording.id)
     }
-    
+
     func moveRecording(id: UUID, to folder: RecordingFolder?) {
         guard let context = modelContext,
               let recording = recordings.first(where: { $0.id == id })
         else { return }
-        
+
         let metadata = fetchOrCreateMetadata(for: recording, context: context)
         metadata.folder = folder
         try? context.save()
-        loadRecordings()
     }
 
     // MARK: - Summarization
@@ -478,10 +503,6 @@ class MainViewModel {
             return segments.first?.detectedLanguage
         }
         return nil
-    }
-
-    func displayName(for recording: Recording) -> String {
-        loadMetadata(for: recording)?.displayName ?? recording.formattedDate
     }
 
     var formattedElapsed: String {

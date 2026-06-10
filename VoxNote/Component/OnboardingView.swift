@@ -6,7 +6,8 @@ struct OnboardingView: View {
     let onComplete: () -> Void
 
     @State private var status: Status = .intro
-
+    @State private var downloadTask: Task<Void, Never>?
+    
     enum Status {
         case intro
         case downloading(String)
@@ -17,7 +18,6 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-
             // Icon
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 80))
@@ -118,13 +118,14 @@ struct OnboardingView: View {
     }
 
     private func downloadModel() async {
-        await vm.loadWhisperModel { msg in
-            Task { @MainActor in status = .downloading(msg) }
-        }
-
-        await MainActor.run {
+        downloadTask = Task {
+            await vm.loadWhisperModel { msg in
+                Task { @MainActor in status = .downloading(msg) }
+            }
             if vm.isWhisperLoaded {
                 status = .done
+            } else if Task.isCancelled {
+                status = .intro
             } else {
                 status = .failed(vm.whisperStatus)
             }

@@ -5,16 +5,14 @@ struct MainView: View {
     @Bindable var vm: MainViewModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @Query private var allMetadata: [RecordingMetadata]
 
     @State private var showNewFolderSheet = false
 
     var body: some View {
         Group {
-            if !hasCompletedOnboarding {
-                OnboardingView(vm: vm) {
-                    hasCompletedOnboarding = true
-                }
+            if !vm.isWhisperLoaded {
+                OnboardingView(vm: vm) {}
             } else {
                 mainContent
             }
@@ -34,7 +32,11 @@ struct MainView: View {
 #endif
         .onAppear {
             vm.modelContext = modelContext
+            vm.allMetadata = allMetadata
             vm.onAppear()
+        }
+        .onChange(of: allMetadata) { _, newValue in
+            vm.allMetadata = newValue
         }
         .alert("Microphone Access Required", isPresented: $vm.showMicrophonePermissionAlert) {
             Button("Open Settings") {
@@ -110,11 +112,12 @@ struct MainView: View {
 
     private var recordingsList: some View {
         Group {
-            if vm.visibleFolders.isEmpty && vm.visibleRecordings.isEmpty {
+            if vm.visibleFolders.isEmpty && vm.visibleRecordingItems.isEmpty && vm.isAtRoot {
                 emptyState
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
+                        // .. parent
                         if !vm.isAtRoot {
                             ParentFolderRow(
                                 onTap: { vm.goBack() },
@@ -123,7 +126,7 @@ struct MainView: View {
                                 }
                             )
                         }
-                        
+
                         ForEach(vm.visibleFolders) { folder in
                             FolderRowView(
                                 folder: folder,
@@ -136,13 +139,13 @@ struct MainView: View {
                             )
                         }
 
-                        ForEach(vm.visibleRecordings) { rec in
+                        ForEach(vm.visibleRecordingItems) { item in
                             RecordingRowView(
-                                recording: rec,
+                                item: item,
                                 player: vm.player,
                                 vm: vm
                             ) {
-                                vm.delete(rec)
+                                vm.delete(item.recording)
                             }
                         }
                     }
@@ -155,12 +158,12 @@ struct MainView: View {
 
     private var emptyState: some View {
         VStack(spacing: 10) {
-            Image(systemName: vm.isAtRoot ? "mic.slash" : "folder")
+            Image(systemName: "mic.slash")
                 .font(.system(size: 40))
                 .foregroundStyle(.secondary)
-            Text(vm.isAtRoot ? "No recordings yet" : "Empty folder")
+            Text("No recordings yet")
                 .foregroundStyle(.secondary)
-            Text(vm.isAtRoot ? "Tap the mic button to start" : "Add recordings or subfolders")
+            Text("Tap the mic button to start")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }

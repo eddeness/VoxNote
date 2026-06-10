@@ -17,5 +17,6 @@ struct VoxNoteApp: App {
             LiveTranscribeView(vm: vm)
         }
         .defaultSize(width: 520, height: 480)
+        .restorationBehavior(.disabled)
     }
 }

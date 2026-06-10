@@ -6,55 +6,65 @@ struct FolderRowView: View {
     let onDelete: () -> Void
     let onRename: (String) -> Void
     let onDrop: (UUID) -> Void
-    
+
     @State private var showRenameSheet = false
-    @State private var newName = ""
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(Color.accentColor)
+        HStack(spacing: 12) {
+            // Tappable area (icon + name) → enter folder
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Color.accentColor)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(folder.name)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.primary)
-                    Text(folder.createdAt.formatted(date: .abbreviated, time: .omitted))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(folder.name)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text(folder.createdAt.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
             }
-            .padding(12)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .buttonStyle(.plain)
+
+            // Rename
+            Button {
+                showRenameSheet = true
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            // Delete
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .dropDestination(for: String.self) { items, _ in
             guard let idString = items.first,
                   let id = UUID(uuidString: idString) else { return false }
             onDrop(id)
             return true
-        }
-        .contextMenu {
-            Button {
-                newName = folder.name
-                showRenameSheet = true
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                showDeleteConfirm = true
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
         }
         .sheet(isPresented: $showRenameSheet) {
             RenameSheet(

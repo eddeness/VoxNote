@@ -15,7 +15,7 @@ class LiveTranscriptionService {
     private var isRunning = false
     private var processingTask: Task<Void, Never>?
     private let sampleRate: Double = 16000
-    private let chunkDuration: Double = 5.0 // process every 5 seconds
+    private let chunkDuration: Double = 3.5 // process every 3.5 seconds
 
     private(set) var fullTranscript: String = ""
 
