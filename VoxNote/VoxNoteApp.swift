@@ -4,11 +4,15 @@ import SwiftData
 @main
 struct VoxNoteApp: App {
     @State private var vm = MainViewModel()
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some Scene {
         WindowGroup("VoxNoteAI") {
             MainView(vm: vm)
                 .modelContainer(for: [RecordingMetadata.self, RecordingFolder.self])
+                .onDisappear {
+                    dismissWindow(id: "live")
+                }
         }
 #if os(macOS)
         .windowResizability(.contentSize)
@@ -17,6 +21,5 @@ struct VoxNoteApp: App {
             LiveTranscribeView(vm: vm)
         }
         .defaultSize(width: 520, height: 480)
-        .restorationBehavior(.disabled)
     }
 }
