@@ -3,6 +3,7 @@ import SwiftUI
 import Observation
 import Translation
 import SwiftData
+import WhisperKit
 
 enum AppState: Equatable {
     case ready
@@ -11,7 +12,7 @@ enum AppState: Equatable {
 }
 
 enum TranscribeState: Equatable {
-    case transcribing(String)  // progress message e.g. "Transcribing… 42%"
+    case transcribing(String)
     case done([TranscriptSegment])
     case error(String)
 }
@@ -19,7 +20,7 @@ enum TranscribeState: Equatable {
 enum LLMTaskState: Equatable {
     case running(String)
     case done(String)
-    case notDownloaded   // language supported but not yet downloaded
+    case notDownloaded
     case error(String)
 }
 
@@ -31,7 +32,6 @@ class TranslationState {
 @Observable
 @MainActor
 class MainViewModel {
-
     // MARK: - App state
     var appState: AppState = .ready
     var recordings: [Recording] = []
@@ -42,10 +42,14 @@ class MainViewModel {
     var transcribeStates: [UUID: TranscribeState] = [:]
     var summaryStates: [UUID: LLMTaskState] = [:]
 
-    // Translation: configuration trigger per recording
+    // Translation
     var translationStateObjects: [UUID: TranslationState] = [:]
     var translationStates: [UUID: LLMTaskState] = [:]
     var pendingTranslationTexts: [UUID: [TranscriptSegment]] = [:]
+
+    // MARK: - Folder navigation
+    var currentFolder: RecordingFolder?
+    var folders: [RecordingFolder] = []
 
     // MARK: - Services
     let player = AudioPlayerService()
@@ -53,7 +57,6 @@ class MainViewModel {
     private let transcription = TranscriptionService()
     let llm = LocalLLMService()
 
-    // SwiftData context — injected from View
     var modelContext: ModelContext?
 
     // MARK: - Whisper model state
@@ -62,11 +65,74 @@ class MainViewModel {
     var showMicrophonePermissionAlert = false
 
     private var recordingTimer: Timer?
-
-    // MARK: - Lifecycle
+    var whisperPipe: WhisperKit? { transcription.loadedPipe }
 
     func onAppear() {
         loadRecordings()
+        loadFolders()
+    }
+
+    // MARK: - Folder
+    var visibleFolders: [RecordingFolder] {
+        folders.filter { $0.parent?.id == currentFolder?.id }
+    }
+
+    var visibleRecordings: [Recording] {
+        let folderID = currentFolder?.id
+        return recordings.filter { rec in
+            loadMetadata(for: rec)?.folder?.id == folderID
+        }
+    }
+
+    var folderPathName: String {
+        currentFolder?.name ?? "Home"
+    }
+
+    var isAtRoot: Bool {
+        currentFolder == nil
+    }
+
+    func loadFolders() {
+        guard let context = modelContext else { return }
+        let descriptor = FetchDescriptor<RecordingFolder>(
+            sortBy: [SortDescriptor(\.createdAt)]
+        )
+        folders = (try? context.fetch(descriptor)) ?? []
+    }
+
+    func createFolder(name: String) -> Bool {
+        guard let context = modelContext else { return false }
+        guard NameValidator.isValid(name) else { return false }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let folder = RecordingFolder(name: trimmed)
+        folder.parent = currentFolder
+        context.insert(folder)
+        try? context.save()
+        loadFolders()
+        return true
+    }
+
+    func deleteFolder(_ folder: RecordingFolder) {
+        guard let context = modelContext else { return }
+        context.delete(folder)
+        try? context.save()
+        loadFolders()
+    }
+
+    func renameFolder(_ folder: RecordingFolder, to newName: String) -> Bool {
+        guard NameValidator.isValid(newName) else { return false }
+        folder.name = newName.trimmingCharacters(in: .whitespaces)
+        try? modelContext?.save()
+        loadFolders()
+        return true
+    }
+
+    func enterFolder(_ folder: RecordingFolder) {
+        currentFolder = folder
+    }
+
+    func goBack() {
+        currentFolder = currentFolder?.parent
     }
 
     // MARK: - Whisper model
@@ -130,6 +196,13 @@ class MainViewModel {
         appState = .ready
         statusMessage = "Saved"
         loadRecordings()
+
+        // 새 녹음을 현재 폴더에 자동 배치
+        if let newRec = recordings.first, let folder = currentFolder {
+            let metadata = fetchOrCreateMetadata(for: newRec, context: modelContext!)
+            metadata.folder = folder
+            try? modelContext?.save()
+        }
     }
 
     // MARK: - Recordings list
@@ -160,6 +233,17 @@ class MainViewModel {
         loadRecordings()
     }
 
+    // MARK: - Recording rename
+    func renameRecording(_ recording: Recording, to newName: String) -> Bool {
+        guard NameValidator.isValid(newName) else { return false }
+        guard let context = modelContext else { return false }
+        let metadata = fetchOrCreateMetadata(for: recording, context: context)
+        metadata.displayName = newName.trimmingCharacters(in: .whitespaces)
+        try? context.save()
+        loadRecordings()  // 추가 — recordings 배열 다시 로드해서 SwiftUI 트리거
+        return true
+    }
+
     // MARK: - Transcription
     var isProcessing: Bool {
         !isWhisperLoaded && whisperStatus != "Model not loaded" ||
@@ -176,7 +260,7 @@ class MainViewModel {
             return false
         }
     }
-    
+
     var isTranscribing: Bool {
         transcribeStates.values.contains {
             if case .transcribing = $0 { return true }
@@ -186,7 +270,7 @@ class MainViewModel {
 
     func transcribe(_ recording: Recording) async {
         let id = recording.id
-        
+
         if !isWhisperLoaded {
             transcribeStates[id] = .transcribing("Loading Model...")
             await loadWhisperModel { [weak self] msg in
@@ -195,7 +279,7 @@ class MainViewModel {
                 }
             }
         }
-        
+
         guard isWhisperLoaded else {
             transcribeStates[id] = .error("Failed to load model")
             return
@@ -233,11 +317,21 @@ class MainViewModel {
         transcribeStates.removeValue(forKey: recording.id)
         summaryStates.removeValue(forKey: recording.id)
         translationStates.removeValue(forKey: recording.id)
-//        translationConfigs.removeValue(forKey: recording.id)
         translationStateObjects.removeValue(forKey: recording.id)
     }
+    
+    func moveRecording(id: UUID, to folder: RecordingFolder?) {
+        guard let context = modelContext,
+              let recording = recordings.first(where: { $0.id == id })
+        else { return }
+        
+        let metadata = fetchOrCreateMetadata(for: recording, context: context)
+        metadata.folder = folder
+        try? context.save()
+        loadRecordings()
+    }
 
-    // MARK: - Summarization (MLX LLM)
+    // MARK: - Summarization
     func summarize(_ recording: Recording, language: LocalLLMService.SummaryLanguage) async {
         guard case .done(let segments) = transcribeStates[recording.id] else { return }
         let fullText = segments.map(\.text).joined(separator: " ")
@@ -256,10 +350,10 @@ class MainViewModel {
                 statusTask.cancel()
                 summaryStates[id] = .running("")
             }
-            
+
             var output = ""
             try await llm.summarize(text: fullText, language: language) { fullDecoded in
-                output = fullDecoded  //
+                output = fullDecoded
                 Task { @MainActor in self.summaryStates[recording.id] = .running(fullDecoded) }
             }
             summaryStates[recording.id] = .done(output)
@@ -273,7 +367,7 @@ class MainViewModel {
         summaryStates.removeValue(forKey: recording.id)
     }
 
-    // MARK: - Translation (Apple Translation API via .translationTask)
+    // MARK: - Translation
     func triggerTranslation(_ recording: Recording, from sourceLang: String?, to language: TranslationLanguage) {
         guard case .done(let segments) = transcribeStates[recording.id] else { return }
 
@@ -295,7 +389,6 @@ class MainViewModel {
                 self.pendingTranslationTexts[id] = segments
                 self.translationStates[id] = .running("Translating…")
 
-//                self.translationConfigs.removeValue(forKey: id)
                 let state = self.translationState(for: id)
                 state.config = nil
                 try? await Task.sleep(for: .milliseconds(100))
@@ -310,7 +403,7 @@ class MainViewModel {
             }
         }
     }
-    
+
     func performTranslation(for recordingID: UUID, using session: TranslationSession) async throws {
         guard let segments = pendingTranslationTexts[recordingID], !segments.isEmpty else { return }
 
@@ -332,7 +425,6 @@ class MainViewModel {
 
     // MARK: - SwiftData persistence
 
-    /// Upsert metadata for a recording
     func saveMetadata(for recording: Recording, segments: [TranscriptSegment]) {
         guard let context = modelContext else { return }
         let filename = recording.filename
@@ -381,7 +473,6 @@ class MainViewModel {
 
     // MARK: - Helpers
 
-    /// Returns the detected language from the first transcribed segment.
     func detectedLanguage(for recording: Recording) -> String? {
         if case .done(let segments) = transcribeStates[recording.id] {
             return segments.first?.detectedLanguage
@@ -389,12 +480,16 @@ class MainViewModel {
         return nil
     }
 
+    func displayName(for recording: Recording) -> String {
+        loadMetadata(for: recording)?.displayName ?? recording.formattedDate
+    }
+
     var formattedElapsed: String {
         let m = elapsedSeconds / 60
         let s = elapsedSeconds % 60
         return String(format: "%02d:%02d", m, s)
     }
-    
+
     func loadSavedTranscript(for recording: Recording) {
         guard let metadata = loadMetadata(for: recording),
               !metadata.transcriptSegments.isEmpty else { return }
@@ -413,7 +508,7 @@ class MainViewModel {
         guard let metadata = loadMetadata(for: recording) else { return false }
         return !metadata.transcriptSegments.isEmpty
     }
-    
+
     func translationState(for id: UUID) -> TranslationState {
         if let existing = translationStateObjects[id] { return existing }
         let new = TranslationState()

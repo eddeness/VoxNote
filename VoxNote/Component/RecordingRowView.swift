@@ -16,6 +16,7 @@ struct RecordingRowView: View {
     @State private var isSummaryExpanded = true
     @State private var isTranslationExpanded = true
     @State private var showDeleteConfirm = false
+    @State private var showRenameSheet = false
 
     private var isThisPlaying: Bool { player.playingID == recording.id && player.isPlaying }
     private var isThisLoaded: Bool { player.playingID == recording.id }
@@ -42,7 +43,7 @@ struct RecordingRowView: View {
                 .buttonStyle(.plain)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(recording.formattedDate)
+                    Text(vm.displayName(for: recording))
                         .font(.subheadline.weight(.medium))
                     Text(isThisLoaded
                          ? player.formattedCurrentTime + " / " + recording.formattedDuration
@@ -55,8 +56,18 @@ struct RecordingRowView: View {
                 transcribeButton
 
                 if case .transcribing = transcribeState {
-                    
+
                 } else {
+                    // Rename button
+                    Button {
+                        showRenameSheet = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
@@ -101,12 +112,11 @@ struct RecordingRowView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        
-                        // Share transcript
+
                         ShareLink(
                             item: segments.map { "[\($0.srtStartTime) → \($0.srtEndTime)]\n\($0.text)" }.joined(separator: "\n\n"),
                             subject: Text("Transcript"),
-                            message: Text(recording.formattedDate)
+                            message: Text(vm.displayName(for: recording))
                         ) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.caption)
@@ -138,6 +148,18 @@ struct RecordingRowView: View {
                     vm.translationState(for: recording.id).config = nil
                 }
             }
+        }
+        .draggable(recording.id.uuidString)
+        .sheet(isPresented: $showRenameSheet) {
+            RenameSheet(
+                title: "Rename Recording",
+                initialName: vm.displayName(for: recording),
+                onSave: { name in
+                    _ = vm.renameRecording(recording, to: name)
+                    showRenameSheet = false
+                },
+                onCancel: { showRenameSheet = false }
+            )
         }
     }
 
@@ -362,13 +384,13 @@ struct RecordingRowView: View {
             llmResultView(.running(text))
         case .done(let text):
             ScrollView {
-                    Text(text)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 300)
-                .scrollIndicators(.never)
+                Text(text)
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 300)
+            .scrollIndicators(.never)
         case .notDownloaded:
             Button {
                 let detectedLang = vm.detectedLanguage(for: recording)

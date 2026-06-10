@@ -10,6 +10,8 @@ class TranscriptionService {
     private var pipe: WhisperKit?
     private var currentTask: Task<[TranscriptSegment], Error>?
     private var setupTask: Task<Void, Error>?
+    
+    var loadedPipe: WhisperKit? { pipe }
 
     // MARK: - Setup
     func load(onProgress: @escaping (String) -> Void) async throws {
