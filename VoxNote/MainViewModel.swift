@@ -32,6 +32,9 @@ class TranslationState {
 @Observable
 @MainActor
 class MainViewModel {
+    @ObservationIgnored
+    @AppStorage("transcribeLanguage") var transcribeLanguageCode: String = "auto"
+    
     // MARK: - App state
     var appState: AppState = .ready
     var recordings: [Recording] = []
@@ -311,10 +314,14 @@ class MainViewModel {
             return
         }
 
+        // 언어 설정 (auto면 nil → WhisperKit 자동 감지)
+        let lang = transcribeLanguageCode == "auto" ? nil : transcribeLanguageCode
+
         transcribeStates[id] = .transcribing("Transcribing… 0%")
         do {
             let segments = try await transcription.transcribe(
                 audioURL: recording.url,
+                language: lang,
                 onProgress: { [weak self] msg in
                     Task { @MainActor [weak self] in
                         self?.transcribeStates[id] = .transcribing(msg)
@@ -535,5 +542,19 @@ class MainViewModel {
         let new = TranslationState()
         translationStateObjects[id] = new
         return new
+    }
+    
+    func resetAll() {
+        player.stop()
+        transcribeStates.removeAll()
+        summaryStates.removeAll()
+        translationStates.removeAll()
+        translationStateObjects.removeAll()
+        pendingTranslationTexts.removeAll()
+        currentFolder = nil
+        appState = .ready
+        elapsedSeconds = 0
+        recordingTimer?.invalidate()
+        recordingTimer = nil
     }
 }

@@ -26,8 +26,8 @@ class LiveTranscriptionService {
     }
 
     // MARK: - Public API
-
     func start(
+        language: String? = nil,
         onText: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
     ) throws {
@@ -84,7 +84,7 @@ class LiveTranscriptionService {
             while self.isRunning {
                 try? await Task.sleep(for: .seconds(self.chunkDuration))
                 guard self.isRunning else { break }
-                await self.processChunk(onText: onText, onError: onError)
+                await self.processChunk(language: language, onText: onText, onError: onError)
             }
         }
     }
@@ -101,6 +101,7 @@ class LiveTranscriptionService {
     // MARK: - Internal
 
     private func processChunk(
+        language: String? = nil,
         onText: @escaping (String) -> Void,
         onError: @escaping (Error) -> Void
     ) async {
@@ -111,7 +112,7 @@ class LiveTranscriptionService {
         audioBuffer = [] // clear after consume
 
         do {
-            let options = DecodingOptions(wordTimestamps: false)
+            let options = DecodingOptions(task: .transcribe, language: language, wordTimestamps: false)
             let results = try await pipe.transcribe(audioArray: samples, decodeOptions: options)
 
             for result in results {

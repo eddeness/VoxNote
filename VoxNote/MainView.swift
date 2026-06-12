@@ -5,9 +5,12 @@ struct MainView: View {
     @Bindable var vm: MainViewModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismissWindow) private var dismissWindow
     @Query private var allMetadata: [RecordingMetadata]
 
+    @AppStorage("transcribeLanguage") private var transcribeLanguageCode: String = "auto"
     @State private var showNewFolderSheet = false
+    @State private var showLanguageSheet = false
 
     var body: some View {
         Group {
@@ -63,6 +66,18 @@ struct MainView: View {
                 onCancel: { showNewFolderSheet = false }
             )
         }
+        .sheet(isPresented: $showLanguageSheet) {
+            LanguagePickerSheet(
+                selectedCode: $transcribeLanguageCode,
+                onDismiss: { showLanguageSheet = false }
+            )
+        }
+        .onAppear {
+            dismissWindow(id: "live")
+        }
+        .onDisappear {
+            vm.resetAll()
+        }
     }
 
     private var toolbar: some View {
@@ -98,6 +113,19 @@ struct MainView: View {
                 }
             }
 
+            // Language chip
+            Button {
+                showLanguageSheet = true
+            } label: {
+                Text(TranscribeLanguage.from(code: transcribeLanguageCode).label)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.tertiary, in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            // New folder
             Button {
                 showNewFolderSheet = true
             } label: {
@@ -117,7 +145,6 @@ struct MainView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
-                        // .. parent
                         if !vm.isAtRoot {
                             ParentFolderRow(
                                 onTap: { vm.goBack() },

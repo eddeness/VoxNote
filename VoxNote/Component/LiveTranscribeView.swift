@@ -81,7 +81,6 @@ struct LiveTranscribeView: View {
     private func start() {
         errorMessage = nil
         Task {
-            // if model is not loaded, model load
             if !vm.isWhisperLoaded {
                 await vm.loadWhisperModel()
             }
@@ -90,8 +89,12 @@ struct LiveTranscribeView: View {
                 return
             }
             liveService.loadModel(pipe)
+
+            let lang = vm.transcribeLanguageCode == "auto" ? nil : vm.transcribeLanguageCode
+
             do {
                 try liveService.start(
+                    language: lang,
                     onText: { text in
                         Task { @MainActor in liveText = text }
                     },

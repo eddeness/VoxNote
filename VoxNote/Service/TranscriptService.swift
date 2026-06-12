@@ -10,33 +10,33 @@ class TranscriptionService {
     private var pipe: WhisperKit?
     private var currentTask: Task<[TranscriptSegment], Error>?
     private var setupTask: Task<Void, Error>?
-    
+
     var loadedPipe: WhisperKit? { pipe }
 
     // MARK: - Setup
     func load(onProgress: @escaping (String) -> Void) async throws {
         setupTask?.cancel()
-        
+
         let task = Task { [weak self] in
             guard let self else { throw CancellationError() }
             let model = self.selectModel()
-            
+
             onProgress("Preparing model…")
-            
+
             _ = try await WhisperKit.download(
                 variant: model,
                 progressCallback: { progress in
                     if Task.isCancelled { return }
-                    
+
                     let pct = Int(progress.fractionCompleted * 100)
                     if pct < 100 {
                         Task { @MainActor in onProgress("Downloading model… \(pct)%") }
                     }
                 }
             )
-            
+
             try Task.checkCancellation()
-            
+
             onProgress("Loading model…")
 
             self.pipe = try await WhisperKit(
@@ -55,21 +55,22 @@ class TranscriptionService {
             try Task.checkCancellation()
             onProgress("Model ready")
         }
-        
+
         setupTask = task
-        
+
         defer {
             if setupTask == task {
                 setupTask = nil
             }
         }
-        
+
         try await task.value
     }
 
     // MARK: - Transcription
     func transcribe(
         audioURL: URL,
+        language: String? = nil,
         onProgress: @escaping (String) -> Void
     ) async throws -> [TranscriptSegment] {
         // Cancel any existing transcription
@@ -77,7 +78,7 @@ class TranscriptionService {
 
         let task = Task { [weak self] in
             guard let self else { throw CancellationError() }
-            return try await self.run(audioURL: audioURL, onProgress: onProgress)
+            return try await self.run(audioURL: audioURL, language: language, onProgress: onProgress)
         }
         currentTask = task
 
@@ -86,18 +87,18 @@ class TranscriptionService {
                 currentTask = nil
             }
         }
-        
+
         return try await task.value
     }
 
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
-        
+
         setupTask?.cancel()
         setupTask = nil
     }
-    
+
     deinit {
         currentTask?.cancel()
         setupTask?.cancel()
@@ -106,6 +107,7 @@ class TranscriptionService {
     // MARK: - Internal
     private func run(
         audioURL: URL,
+        language: String? = nil,
         onProgress: @escaping (String) -> Void
     ) async throws -> [TranscriptSegment] {
         guard let pipe else { throw TranscriptionError.notLoaded }
@@ -115,7 +117,14 @@ class TranscriptionService {
         let asset = AVURLAsset(url: audioURL)
         let duration = try await asset.load(.duration)
         let totalDuration = CMTimeGetSeconds(duration)
-        let options = DecodingOptions(wordTimestamps: true)
+
+        // task: .transcribe keeps the original language instead of translating to English.
+        // language: nil lets WhisperKit auto-detect.
+        let options = DecodingOptions(
+            task: .transcribe,
+            language: language,
+            wordTimestamps: true
+        )
 
         let results = try await pipe.transcribe(
             audioPath: audioURL.path,
@@ -167,9 +176,13 @@ class TranscriptionService {
             ? "openai_whisper-large-v3"
             : "openai_whisper-medium"
 #else
-        return ramGB >= 6
-            ? "openai_whisper-medium"
-            : "openai_whisper-base"
+        if ramGB >= 8 {
+            return "openai_whisper-medium"
+        } else if ramGB >= 6 {
+            return "openai_whisper-small"
+        } else {
+            return "openai_whisper-base"
+        }
 #endif
     }
 }
