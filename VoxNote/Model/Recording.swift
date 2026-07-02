@@ -21,6 +21,20 @@ struct Recording: Identifiable, Equatable, Sendable {
         let s = Int(duration) % 60
         return String(format: "%02d:%02d", m, s)
     }
+    
+    var fileSizeBytes: Int64? {
+        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
+        return values?.fileSize.map { Int64($0) }
+    }
+
+    var formattedFileSize: String {
+        guard let bytes = fileSizeBytes else { return "" }
+        let mb = Double(bytes) / 1_000_000
+        if mb < 1 {
+            return String(format: "%.0f KB", mb * 1000)
+        }
+        return String(format: "%.1f MB", mb)
+    }
 }
 
 extension Recording: Transferable {

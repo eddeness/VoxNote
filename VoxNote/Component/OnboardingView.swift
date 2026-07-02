@@ -7,7 +7,8 @@ struct OnboardingView: View {
 
     @State private var status: Status = .intro
     @State private var downloadTask: Task<Void, Never>?
-    
+    @State private var availableGB: Double = 0
+
     enum Status {
         case intro
         case downloading(String)
@@ -15,9 +16,30 @@ struct OnboardingView: View {
         case failed(String)
     }
 
+    private var requiredGB: Double {
+#if os(macOS)
+        return 4.0
+#else
+        return 2.0
+#endif
+    }
+
+    private var modelSizeText: String {
+#if os(macOS)
+        return "First-time setup downloads ~3GB AI model"
+#else
+        return "First-time setup downloads ~150MB–1.5GB AI model"
+#endif
+    }
+
+    private var diskSpaceOK: Bool {
+        availableGB <= 0 || availableGB >= requiredGB
+    }
+
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
+
             // Icon
             Image(systemName: "waveform.circle.fill")
                 .font(.system(size: 80))
@@ -46,10 +68,28 @@ struct OnboardingView: View {
                 case .intro:
                     VStack(spacing: 8) {
                         InfoRow(icon: "checkmark.shield", text: "Fully on-device, no data sent to servers")
-                        InfoRow(icon: "arrow.down.circle", text: "First-time setup downloads ~3GB AI model")
+                        InfoRow(icon: "arrow.down.circle", text: modelSizeText)
                         InfoRow(icon: "wifi", text: "Internet required only for initial download")
+
+                        // Disk space row
+                        if availableGB > 0 {
+                            InfoRow(
+                                icon: diskSpaceOK ? "internaldrive" : "exclamationmark.triangle",
+                                text: String(format: "Available disk space: %.1f GB", availableGB)
+                            )
+                            .foregroundStyle(diskSpaceOK ? .secondary : Color.orange)
+                        }
                     }
                     .padding(.vertical, 8)
+
+                    // Low disk space warning
+                    if availableGB > 0 && !diskSpaceOK {
+                        Text("Low disk space. At least \(Int(requiredGB)) GB is recommended.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: 380)
+                    }
 
                     Button {
                         Task { await downloadModel() }
@@ -114,7 +154,21 @@ struct OnboardingView: View {
             Spacer()
         }
         .padding(40)
+#if os(macOS)
         .frame(minWidth: 560, minHeight: 540)
+#endif
+        .onAppear {
+            checkDiskSpace()
+        }
+    }
+
+    private func checkDiskSpace() {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return }
+        if let bytes = values.volumeAvailableCapacityForImportantUsage {
+            availableGB = Double(bytes) / 1_000_000_000
+        }
     }
 
     private func downloadModel() async {

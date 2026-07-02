@@ -8,7 +8,6 @@ struct TranscribeLanguage: Identifiable, Hashable {
     var id: String { code }
 
     static let supported: [TranscribeLanguage] = [
-        TranscribeLanguage(code: "auto", label: "AUTO", displayName: "Auto-detect"),
         TranscribeLanguage(code: "en", label: "EN", displayName: "English"),
         TranscribeLanguage(code: "ko", label: "KO", displayName: "한국어"),
         TranscribeLanguage(code: "ja", label: "JA", displayName: "日本語"),

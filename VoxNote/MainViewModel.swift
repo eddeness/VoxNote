@@ -33,8 +33,8 @@ class TranslationState {
 @MainActor
 class MainViewModel {
     @ObservationIgnored
-    @AppStorage("transcribeLanguage") var transcribeLanguageCode: String = "auto"
-    
+    @AppStorage("transcribeLanguage") var transcribeLanguageCode: String = "en"
+
     // MARK: - App state
     var appState: AppState = .ready
     var recordings: [Recording] = []
@@ -70,8 +70,12 @@ class MainViewModel {
 
     private var recordingTimer: Timer?
     var whisperPipe: WhisperKit? { transcription.loadedPipe }
+    var showMaxDurationAlert = false
 
     func onAppear() {
+        if transcribeLanguageCode == "auto" {
+            transcribeLanguageCode = "en"
+        }
         loadRecordings()
         loadFolders()
     }
@@ -87,7 +91,6 @@ class MainViewModel {
         return recordings.compactMap { rec in
             let metadata = allMetadata.first { $0.filename == rec.filename }
             guard metadata?.folder?.id == folderID else {
-                // 메타데이터 없으면 루트 폴더로 간주
                 if metadata == nil && folderID == nil {
                     return RecordingItem(
                         recording: rec,
@@ -149,10 +152,12 @@ class MainViewModel {
     }
 
     func enterFolder(_ folder: RecordingFolder) {
+        player.stop()
         currentFolder = folder
     }
 
     func goBack() {
+        player.stop()
         currentFolder = currentFolder?.parent
     }
 
@@ -188,6 +193,27 @@ class MainViewModel {
 
     private func startRecording() {
         player.stop()
+
+        // Auto-stop when max duration is reached
+        audio.onMaxDurationReached = { [weak self] in
+            guard let self else { return }
+            self.recordingTimer?.invalidate()
+            self.recordingTimer = nil
+            self.appState = .ready
+            self.statusMessage = "Saved"
+            self.loadRecordings()
+            self.showMaxDurationAlert = true
+
+            if let newRec = self.recordings.first,
+               let folder = self.currentFolder {
+                if let context = self.modelContext {
+                    let metadata = self.fetchOrCreateMetadata(for: newRec, context: context)
+                    metadata.folder = folder
+                    try? context.save()
+                }
+            }
+        }
+
         Task {
             do {
                 try await audio.startRecording()
@@ -220,9 +246,11 @@ class MainViewModel {
 
         // 새 녹음을 현재 폴더에 자동 배치
         if let newRec = recordings.first, let folder = currentFolder {
-            let metadata = fetchOrCreateMetadata(for: newRec, context: modelContext!)
-            metadata.folder = folder
-            try? modelContext?.save()
+            if let context = modelContext {
+                let metadata = fetchOrCreateMetadata(for: newRec, context: context)
+                metadata.folder = folder
+                try? context.save()
+            }
         }
     }
 
@@ -240,7 +268,6 @@ class MainViewModel {
         translationStateObjects.removeValue(forKey: recording.id)
         pendingTranslationTexts.removeValue(forKey: recording.id)
 
-        // SwiftData metadata도 삭제
         if let context = modelContext,
            let metadata = allMetadata.first(where: { $0.filename == recording.filename }) {
             context.delete(metadata)
@@ -314,8 +341,7 @@ class MainViewModel {
             return
         }
 
-        // 언어 설정 (auto면 nil → WhisperKit 자동 감지)
-        let lang = transcribeLanguageCode == "auto" ? nil : transcribeLanguageCode
+        let lang: String? = transcribeLanguageCode
 
         transcribeStates[id] = .transcribing("Transcribing… 0%")
         do {
@@ -543,7 +569,7 @@ class MainViewModel {
         translationStateObjects[id] = new
         return new
     }
-    
+
     func resetAll() {
         player.stop()
         transcribeStates.removeAll()

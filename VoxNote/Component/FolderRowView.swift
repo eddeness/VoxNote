@@ -121,7 +121,12 @@ struct RenameSheet: View {
             }
         }
         .padding(20)
+#if os(macOS)
         .frame(width: 360)
+#else
+        .presentationDetents([.height(200)])
+        .presentationDragIndicator(.visible)
+#endif
         .onAppear { name = initialName }
     }
 

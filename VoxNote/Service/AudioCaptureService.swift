@@ -25,6 +25,13 @@ class AudioCaptureService {
 
     private let engine = AVAudioEngine()
     private var audioFile: AVAudioFile?
+    private var recordingStartTime: Date?
+
+    // Max recording duration: 3 hours
+    private let maxRecordingDuration: TimeInterval = 3 * 60 * 60
+
+    // Called when max duration is reached — ViewModel listens to this
+    var onMaxDurationReached: (() -> Void)?
 
     // MARK: - Recordings directory
     static var recordingsDirectory: URL {
@@ -40,15 +47,51 @@ class AudioCaptureService {
         try configureAudioSession()
 
         let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        let recordFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 44100,
+            channels: 1,
+            interleaved: false
+        )!
 
         let filename = "rec_\(Int(Date().timeIntervalSince1970)).wav"
         let url = Self.recordingsDirectory.appendingPathComponent(filename)
         recordingURL = url
-        audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
+        audioFile = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            try? self?.audioFile?.write(from: buffer)
+        let converter = AVAudioConverter(from: inputFormat, to: recordFormat)!
+
+        recordingStartTime = Date()
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+
+            // Check max duration
+            if let start = self.recordingStartTime,
+               Date().timeIntervalSince(start) >= self.maxRecordingDuration {
+                Task { @MainActor in
+                    _ = self.stopRecording()
+                    self.onMaxDurationReached?()
+                }
+                return
+            }
+
+            let frameCapacity = AVAudioFrameCount(
+                Double(buffer.frameLength) * recordFormat.sampleRate / inputFormat.sampleRate
+            )
+            guard let convertedBuffer = AVAudioPCMBuffer(
+                pcmFormat: recordFormat,
+                frameCapacity: frameCapacity
+            ) else { return }
+
+            converter.convert(to: convertedBuffer, error: nil) { _, outStatus in
+                outStatus.pointee = .haveData
+                return buffer
+            }
+
+            try? self.audioFile?.write(from: convertedBuffer)
         }
 
         engine.prepare()
@@ -59,11 +102,11 @@ class AudioCaptureService {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         audioFile = nil
+        recordingStartTime = nil
         deactivateAudioSession()
         return recordingURL
     }
-    
-    
+
     private func requestPermission() async throws {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
@@ -78,7 +121,7 @@ class AudioCaptureService {
             throw RecordingError.permissionDenied
         }
     }
-    
+
     // MARK: - Saved recordings
 
     static func loadSavedRecordings() -> [Recording] {
@@ -116,7 +159,11 @@ class AudioCaptureService {
     private func configureAudioSession() throws {
 #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try session.setCategory(
+            .record,
+            mode: .default,
+            options: []
+        )
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 #endif
     }

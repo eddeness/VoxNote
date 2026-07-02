@@ -3,14 +3,18 @@ import SwiftData
 
 struct MainView: View {
     @Bindable var vm: MainViewModel
+#if os(macOS)
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismissWindow) private var dismissWindow
+#endif
+    @Environment(\.modelContext) private var modelContext
     @Query private var allMetadata: [RecordingMetadata]
 
     @AppStorage("transcribeLanguage") private var transcribeLanguageCode: String = "auto"
     @State private var showNewFolderSheet = false
     @State private var showLanguageSheet = false
+    @State private var showLiveSheet = false
+    @State private var availableDiskGB: Double = 0
 
     var body: some View {
         Group {
@@ -37,10 +41,24 @@ struct MainView: View {
             vm.modelContext = modelContext
             vm.allMetadata = allMetadata
             vm.onAppear()
+            checkDiskSpace()
+#if os(macOS)
+            dismissWindow(id: "live")
+#endif
         }
         .onChange(of: allMetadata) { _, newValue in
             vm.allMetadata = newValue
         }
+#if os(iOS)
+        .onChange(of: vm.isRecording) { _, recording in
+            UIApplication.shared.isIdleTimerDisabled = recording
+        }
+#endif
+#if os(macOS)
+        .onDisappear {
+            vm.resetAll()
+        }
+#endif
         .alert("Microphone Access Required", isPresented: $vm.showMicrophonePermissionAlert) {
             Button("Open Settings") {
 #if os(macOS)
@@ -54,6 +72,11 @@ struct MainView: View {
             Button("Cancel", role: .cancel) { vm.appState = .ready }
         } message: {
             Text("VoxNoteAI needs microphone access to record audio.")
+        }
+        .alert("Recording Stopped", isPresented: $vm.showMaxDurationAlert) {
+            Button("OK") { vm.showMaxDurationAlert = false }
+        } message: {
+            Text("Maximum recording duration (3 hours) has been reached. Your recording has been saved.")
         }
         .sheet(isPresented: $showNewFolderSheet) {
             RenameSheet(
@@ -72,14 +95,21 @@ struct MainView: View {
                 onDismiss: { showLanguageSheet = false }
             )
         }
-        .onAppear {
-            dismissWindow(id: "live")
+#if os(iOS)
+        .fullScreenCover(isPresented: $showLiveSheet) {
+            LiveTranscribeView(vm: vm, onClose: { showLiveSheet = false })
         }
-        .onDisappear {
-            vm.resetAll()
-        }
+#endif
     }
 
+    private func checkDiskSpace() {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return }
+        if let bytes = values.volumeAvailableCapacityForImportantUsage {
+            availableDiskGB = Double(bytes) / 1_000_000_000
+        }
+    }
     private var toolbar: some View {
         HStack(spacing: 12) {
             if !vm.isAtRoot {
@@ -133,6 +163,13 @@ struct MainView: View {
                     .font(.headline)
             }
             .buttonStyle(.plain)
+
+            // Disk space indicator
+            if availableDiskGB > 0 {
+                Text(String(format: "%.1f GB", availableDiskGB))
+                    .font(.caption)
+                    .foregroundStyle(availableDiskGB >= 2 ? .secondary : Color.orange)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -177,6 +214,7 @@ struct MainView: View {
                         }
                     }
                     .padding()
+                    .id(vm.folderPathName)
                 }
             }
         }
@@ -219,7 +257,11 @@ struct MainView: View {
             HStack {
                 if vm.isRecording {
                     Button {
+#if os(macOS)
                         openWindow(id: "live")
+#else
+                        showLiveSheet = true
+#endif
                     } label: {
                         Label("Live", systemImage: "waveform")
                             .font(.caption.weight(.semibold))

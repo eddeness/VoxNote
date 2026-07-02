@@ -3,6 +3,9 @@ import SwiftUI
 struct LiveTranscribeView: View {
     @Bindable var vm: MainViewModel
 
+    // iOS dismisses via this; macOS ignores it (window close).
+    var onClose: (() -> Void)? = nil
+
     @State private var liveText: String = ""
     @State private var errorMessage: String?
     private let liveService = LiveTranscriptionService()
@@ -19,7 +22,9 @@ struct LiveTranscribeView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
+
                 Spacer()
+
                 ShareLink(item: liveText) {
                     Image(systemName: "square.and.arrow.up")
                         .font(.caption)
@@ -27,9 +32,22 @@ struct LiveTranscribeView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(liveText.isEmpty)
+
+                // Close button (iOS only — macOS uses the window close button)
+#if os(iOS)
+                Button {
+                    onClose?()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
+#endif
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
 
             Divider()
 
@@ -62,7 +80,9 @@ struct LiveTranscribeView: View {
                     .padding(.vertical, 6)
             }
         }
+#if os(macOS)
         .frame(minWidth: 480, minHeight: 400)
+#endif
         .onChange(of: vm.isRecording) {
             if vm.isRecording {
                 start()
@@ -81,6 +101,7 @@ struct LiveTranscribeView: View {
     private func start() {
         errorMessage = nil
         Task {
+            // Load model first if needed.
             if !vm.isWhisperLoaded {
                 await vm.loadWhisperModel()
             }

@@ -50,6 +50,11 @@ struct RecordingRowView: View {
                          : recording.formattedDuration)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    if !recording.formattedFileSize.isEmpty {
+                        Text(recording.formattedFileSize)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
 
                 Spacer()
