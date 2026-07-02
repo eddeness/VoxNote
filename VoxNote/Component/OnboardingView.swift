@@ -66,10 +66,11 @@ struct OnboardingView: View {
             VStack(spacing: 16) {
                 switch status {
                 case .intro:
-                    VStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 8) {
                         InfoRow(icon: "checkmark.shield", text: "Fully on-device, no data sent to servers")
                         InfoRow(icon: "arrow.down.circle", text: modelSizeText)
                         InfoRow(icon: "wifi", text: "Internet required only for initial download")
+                        InfoRow(icon: "iphone", text: "iPhone 12 Pro or later recommended for best accuracy")
 
                         // Disk space row
                         if availableGB > 0 {
@@ -192,7 +193,7 @@ private struct InfoRow: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 20)
