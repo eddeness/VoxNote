@@ -199,6 +199,8 @@ private struct InfoRow: View {
             Text(text)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
         }
     }
 }

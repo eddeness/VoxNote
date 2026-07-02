@@ -19,8 +19,10 @@ class TranscriptionService {
 
         let task = Task { [weak self] in
             guard let self else { throw CancellationError() }
-            let model = self.selectModel()
-
+            
+            let recommendedModels = WhisperKit.recommendedModels()
+            let model = recommendedModels.default
+            
             onProgress("Preparing model…")
 
             _ = try await WhisperKit.download(
@@ -169,22 +171,20 @@ class TranscriptionService {
     }
 
     // MARK: - Model selection
-    private func selectModel() -> String {
-        let ramGB = ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024)
-#if os(macOS)
-        return ramGB >= 16
-            ? "openai_whisper-large-v3"
-            : "openai_whisper-medium"
-#else
-        if ramGB >= 8 {
-            return "openai_whisper-medium"
-        } else if ramGB >= 6 {
-            return "openai_whisper-small"
-        } else {
-            return "openai_whisper-base"
-        }
-#endif
-    }
+//    private func selectModel() -> String {
+//        let ramGB = ProcessInfo.processInfo.physicalMemory / (1024 * 1024 * 1024)
+//#if os(macOS)
+//        return ramGB >= 16
+//            ? "openai_whisper-large-v3"
+//            : "openai_whisper-medium"
+//#else
+//        if ramGB >= 8 {
+//            return "openai_whisper-medium"
+//        } else  {
+//            return "openai_whisper-base"
+//        }
+//#endif
+//    }
 }
 
 enum TranscriptionError: LocalizedError {
