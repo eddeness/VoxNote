@@ -26,9 +26,9 @@ struct OnboardingView: View {
 
     private var modelSizeText: String {
 #if os(macOS)
-        return "First-time setup downloads ~3GB AI model"
+        return "First-time setup downloads ~1GB AI model"
 #else
-        return "First-time setup downloads ~150MB–1.5GB AI model"
+        return "First-time setup downloads ~150MB–500MB AI model"
 #endif
     }
 

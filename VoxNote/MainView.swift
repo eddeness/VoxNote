@@ -10,9 +10,7 @@ struct MainView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var allMetadata: [RecordingMetadata]
 
-    @AppStorage("transcribeLanguage") private var transcribeLanguageCode: String = "auto"
     @State private var showNewFolderSheet = false
-    @State private var showLanguageSheet = false
     @State private var showLiveSheet = false
     @State private var availableDiskGB: Double = 0
 
@@ -89,12 +87,6 @@ struct MainView: View {
                 onCancel: { showNewFolderSheet = false }
             )
         }
-        .sheet(isPresented: $showLanguageSheet) {
-            LanguagePickerSheet(
-                selectedCode: $transcribeLanguageCode,
-                onDismiss: { showLanguageSheet = false }
-            )
-        }
 #if os(iOS)
         .fullScreenCover(isPresented: $showLiveSheet) {
             LiveTranscribeView(vm: vm, onClose: { showLiveSheet = false })
@@ -110,6 +102,7 @@ struct MainView: View {
             availableDiskGB = Double(bytes) / 1_000_000_000
         }
     }
+
     private var toolbar: some View {
         HStack(spacing: 12) {
             if !vm.isAtRoot {
@@ -142,18 +135,6 @@ struct MainView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            // Language chip
-            Button {
-                showLanguageSheet = true
-            } label: {
-                Text(TranscribeLanguage.from(code: transcribeLanguageCode).label)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.tertiary, in: Capsule())
-            }
-            .buttonStyle(.plain)
 
             // New folder
             Button {

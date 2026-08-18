@@ -16,6 +16,8 @@ struct RecordingRowView: View {
     @State private var isTranslationExpanded = true
     @State private var showDeleteConfirm = false
     @State private var showRenameSheet = false
+    @State private var showLanguagePicker = false
+    @State private var pendingLanguageCode = "en"
 
     private var recording: Recording { item.recording }
 
@@ -162,6 +164,15 @@ struct RecordingRowView: View {
                 onCancel: { showRenameSheet = false }
             )
         }
+        .sheet(isPresented: $showLanguagePicker) {
+            LanguagePickerSheet(
+                selectedCode: $pendingLanguageCode,
+                onDismiss: {
+                    showLanguagePicker = false
+                    Task { await vm.transcribe(recording, language: pendingLanguageCode) }
+                }
+            )
+        }
     }
 
     @ViewBuilder
@@ -174,7 +185,7 @@ struct RecordingRowView: View {
                 }
             } else {
                 actionChip(label: "Transcribe", icon: "text.bubble", color: .accentColor) {
-                    Task { await vm.transcribe(recording) }
+                    showLanguagePicker = true
                 }
                 .disabled(vm.isTranscribing)
                 .opacity(vm.isTranscribing ? 0.4 : 1)
@@ -199,7 +210,7 @@ struct RecordingRowView: View {
             }
         case .error:
             actionChip(label: "Retry", icon: "arrow.clockwise", color: .orange) {
-                Task { await vm.transcribe(recording) }
+                showLanguagePicker = true
             }
         }
     }

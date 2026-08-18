@@ -8,6 +8,8 @@ struct LiveTranscribeView: View {
 
     @State private var liveText: String = ""
     @State private var errorMessage: String?
+    @State private var showLanguagePicker = false
+    @State private var selectedLanguageCode = "en"
     private let liveService = LiveTranscriptionService()
 
     var body: some View {
@@ -24,6 +26,18 @@ struct LiveTranscribeView: View {
                 }
 
                 Spacer()
+
+                // Language chip — tap to change language for live transcription
+                Button {
+                    showLanguagePicker = true
+                } label: {
+                    Text(TranscribeLanguage.from(code: selectedLanguageCode).label)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.tertiary, in: Capsule())
+                }
+                .buttonStyle(.plain)
 
                 ShareLink(item: liveText) {
                     Image(systemName: "square.and.arrow.up")
@@ -96,6 +110,19 @@ struct LiveTranscribeView: View {
         .onDisappear {
             stop()
         }
+        .sheet(isPresented: $showLanguagePicker) {
+            LanguagePickerSheet(
+                selectedCode: $selectedLanguageCode,
+                onDismiss: {
+                    showLanguagePicker = false
+                    // Restart live transcription with the new language
+                    if vm.isRecording {
+                        stop()
+                        start()
+                    }
+                }
+            )
+        }
     }
 
     private func start() {
@@ -111,11 +138,9 @@ struct LiveTranscribeView: View {
             }
             liveService.loadModel(pipe)
 
-            let lang = vm.transcribeLanguageCode == "auto" ? nil : vm.transcribeLanguageCode
-
             do {
                 try liveService.start(
-                    language: lang,
+                    language: selectedLanguageCode,
                     onText: { text in
                         Task { @MainActor in liveText = text }
                     },

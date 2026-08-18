@@ -32,9 +32,6 @@ class TranslationState {
 @Observable
 @MainActor
 class MainViewModel {
-    @ObservationIgnored
-    @AppStorage("transcribeLanguage") var transcribeLanguageCode: String = "en"
-
     // MARK: - App state
     var appState: AppState = .ready
     var recordings: [Recording] = []
@@ -73,9 +70,6 @@ class MainViewModel {
     var showMaxDurationAlert = false
 
     func onAppear() {
-        if transcribeLanguageCode == "auto" {
-            transcribeLanguageCode = "en"
-        }
         loadRecordings()
         loadFolders()
     }
@@ -324,8 +318,9 @@ class MainViewModel {
         }
     }
 
-    func transcribe(_ recording: Recording) async {
+    func transcribe(_ recording: Recording, language: String) async {
         let id = recording.id
+        let lang: String? = language
 
         if !isWhisperLoaded {
             transcribeStates[id] = .transcribing("Loading Model...")
@@ -340,8 +335,6 @@ class MainViewModel {
             transcribeStates[id] = .error("Failed to load model")
             return
         }
-
-        let lang: String? = transcribeLanguageCode
 
         transcribeStates[id] = .transcribing("Transcribing… 0%")
         do {
@@ -578,6 +571,9 @@ class MainViewModel {
         translationStateObjects.removeAll()
         pendingTranslationTexts.removeAll()
         currentFolder = nil
+        folders = []
+        allMetadata = []
+        recordings = []
         appState = .ready
         elapsedSeconds = 0
         recordingTimer?.invalidate()
