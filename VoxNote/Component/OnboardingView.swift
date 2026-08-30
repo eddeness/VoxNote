@@ -26,9 +26,9 @@ struct OnboardingView: View {
 
     private var modelSizeText: String {
 #if os(macOS)
-        return "First-time setup downloads ~1GB AI model"
+        return "First-time setup downloads ~3GB AI model"
 #else
-        return "First-time setup downloads ~150MB–500MB AI model"
+        return "First-time setup downloads ~150MB–1.5GB AI model"
 #endif
     }
 
@@ -66,11 +66,11 @@ struct OnboardingView: View {
             VStack(spacing: 16) {
                 switch status {
                 case .intro:
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(spacing: 8) {
                         InfoRow(icon: "checkmark.shield", text: "Fully on-device, no data sent to servers")
                         InfoRow(icon: "arrow.down.circle", text: modelSizeText)
                         InfoRow(icon: "wifi", text: "Internet required only for initial download")
-                        InfoRow(icon: "iphone", text: "iPhone 12 Pro or later recommended for best accuracy")
+                        InfoRow(icon: "iphone", text: "iPhone 12 or later / Apple Silicon Mac recommended")
 
                         // Disk space row
                         if availableGB > 0 {
@@ -110,8 +110,21 @@ struct OnboardingView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
+
+                        // Cancel is only meaningful while the file is downloading.
+                        // Once model loading (CoreML compilation) starts, cancellation
+                        // may not stop the work already in progress, so hide it.
+                        if isCancellable(msg) {
+                            Button("Cancel") {
+                                downloadTask?.cancel()
+                                downloadTask = nil
+                                status = .intro
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
-                    .frame(height: 80)
+                    .frame(minHeight: 100)
 
                 case .done:
                     VStack(spacing: 12) {
@@ -141,12 +154,17 @@ struct OnboardingView: View {
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: 380)
                         HStack {
-                            Button("Retry") {
+                            // Retry — re-attempts the download. WhisperKit/Hugging Face's
+                            // downloader may skip already-completed files, but does not
+                            // guarantee byte-level resume of a partial file.
+                            Button("Retry Download") {
                                 Task { await downloadModel() }
                             }
                             .buttonStyle(.borderedProminent)
-                            Button("Skip") { onComplete() }
-                                .buttonStyle(.bordered)
+                            Button("Start Over") {
+                                status = .intro
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -161,28 +179,56 @@ struct OnboardingView: View {
         .onAppear {
             checkDiskSpace()
         }
+        .onDisappear {
+            // If the view is dismissed mid-download (e.g. app backgrounded/killed),
+            // cancel the task so it doesn't keep running unattended.
+            downloadTask?.cancel()
+        }
+    }
+
+    private func isCancellable(_ msg: String) -> Bool {
+        // Only cancellable while actively downloading, and only below 90% —
+        // past that point the transfer is close enough to done that cancelling
+        // wastes more than it saves, and loading (CoreML compile) is imminent.
+        guard msg.lowercased().hasPrefix("downloading") else { return false }
+        if let pctRange = msg.range(of: #"\d+"#, options: .regularExpression),
+           let pct = Int(msg[pctRange]) {
+            return pct < 90
+        }
+        return true
     }
 
     private func checkDiskSpace() {
         let url = URL(fileURLWithPath: NSHomeDirectory())
-        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityForImportantUsageKey]
-        guard let values = try? url.resourceValues(forKeys: keys) else { return }
-        if let bytes = values.volumeAvailableCapacityForImportantUsage {
+        let values = try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityKey]
+        )
+        if let bytes = values?.volumeAvailableCapacity {
             availableGB = Double(bytes) / 1_000_000_000
         }
     }
 
     private func downloadModel() async {
+        status = .downloading("Starting…")
         downloadTask = Task {
             await vm.loadWhisperModel { msg in
-                Task { @MainActor in status = .downloading(msg) }
+                Task { @MainActor in
+                    if !Task.isCancelled {
+                        status = .downloading(msg)
+                    }
+                }
             }
-            if vm.isWhisperLoaded {
-                status = .done
-            } else if Task.isCancelled {
-                status = .intro
-            } else {
-                status = .failed(vm.whisperStatus)
+            // Route every status transition through the main actor together,
+            // so cancellation / success / failure are decided consistently.
+            await MainActor.run {
+                if Task.isCancelled {
+                    // Cancelled — stay on intro so user can resume later.
+                    status = .intro
+                } else if vm.isWhisperLoaded {
+                    status = .done
+                } else {
+                    status = .failed(vm.whisperStatus)
+                }
             }
         }
     }
@@ -196,12 +242,13 @@ private struct InfoRow: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 20)
+                .frame(width: 20, alignment: .center)
             Text(text)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -180,8 +180,13 @@ struct RecordingRowView: View {
         switch transcribeState {
         case .none:
             if vm.hasSavedTranscript(for: recording) {
-                actionChip(label: "Load", icon: "arrow.down.circle", color: .green) {
-                    vm.loadSavedTranscript(for: recording)
+                VStack(alignment: .trailing, spacing: 6) {
+                    actionChip(label: "Load", icon: "arrow.down.circle", color: .green) {
+                        vm.loadSavedTranscript(for: recording)
+                    }
+                    actionChip(label: "Re-transcribe", icon: "arrow.triangle.2.circlepath", color: .accentColor) {
+                        showLanguagePicker = true
+                    }
                 }
             } else {
                 actionChip(label: "Transcribe", icon: "text.bubble", color: .accentColor) {
