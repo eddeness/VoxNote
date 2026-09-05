@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import WhisperKit
 import Foundation
 
@@ -56,9 +56,9 @@ class LiveTranscriptionService {
 
     func start(
         language: String? = nil,
-        onText: @escaping (String) -> Void,
-        onNewConfirmedLine: @escaping (String) -> Void,
-        onError: @escaping (Error) -> Void
+        onText: @escaping @Sendable (String) -> Void,
+        onNewConfirmedLine: @escaping @Sendable (String) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
     ) throws {
         guard let pipe else { throw TranscriptionError.notLoaded }
         _ = pipe // silence warning
@@ -82,7 +82,9 @@ class LiveTranscriptionService {
 
         let converter = AVAudioConverter(from: inputFormat, to: targetFormat)!
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // @Sendable keeps this off the main actor — see AudioCaptureService for
+        // why an actor-isolated tap block crashes on the realtime audio thread.
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable [weak self] buffer, _ in
             guard let self else { return }
 
             let frameCapacity = AVAudioFrameCount(
@@ -134,9 +136,9 @@ class LiveTranscriptionService {
     // MARK: - Internal
 
     private func processChunk(
-        onText: @escaping (String) -> Void,
-        onNewConfirmedLine: @escaping (String) -> Void,
-        onError: @escaping (Error) -> Void
+        onText: @escaping @Sendable (String) -> Void,
+        onNewConfirmedLine: @escaping @Sendable (String) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
     ) async {
         guard let pipe else { return }
         guard incomingBuffer.count > Int(sampleRate * 1.0) else { return } // need at least 1 second

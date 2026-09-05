@@ -10,7 +10,7 @@ import Tokenizers
 @MainActor
 class LocalLLMService {
     var isLoaded = false
-    var loadStatus = "Not loaded"
+    var loadStatus = String(localized: "Not loaded")
     var isGenerating = false
 
     private var modelContainer: ModelContainer?
@@ -43,27 +43,28 @@ class LocalLLMService {
     // MARK: - Load model
     func load() async throws {
         guard !isLoaded else { return }
-        loadStatus = "Loading LLM…"
+        loadStatus = String(localized: "Loading AI model…")
 
         let config = selectModel()
         modelContainer = try await LLMModelFactory.shared.loadContainer(
             configuration: config
         ) { [weak self] progress in
             Task { @MainActor [weak self] in
-                self?.loadStatus = "Downloading… \(Int(progress.fractionCompleted * 100))%"
+                self?.loadStatus = String(format: String(localized: "Downloading… %d%%"), Int(progress.fractionCompleted * 100))
             }
         }
 
         isLoaded = true
-        loadStatus = "LLM ready"
+        loadStatus = String(localized: "AI model ready")
     }
 
     // MARK: - Summarize
+    @discardableResult
     func summarize(
         text: String,
         language: SummaryLanguage,
-        onToken: @escaping (String) -> Void
-    ) async throws {
+        onToken: @escaping @Sendable (String) -> Void
+    ) async throws -> String {
         guard let modelContainer else { throw LLMError.notLoaded }
 
         isGenerating = true
@@ -80,20 +81,21 @@ class LocalLLMService {
 
         let input = UserInput(prompt: .text(prompt))
 
-        try await modelContainer.perform { context in
+        return try await modelContainer.perform { context in
             let lmInput = try await context.processor.prepare(input: input)
-            let _ = try MLXLMCommon.generate(
+            let result = try MLXLMCommon.generate(
                 input: lmInput,
                 parameters: GenerateParameters(maxTokens: 1024, temperature: 0.6),
                 context: context
             ) { tokens in
-                
+
                 if Task.isCancelled { return .stop }
-                
+
                 let decoded = context.tokenizer.decode(tokens: tokens)
                 Task { @MainActor in onToken(decoded) }
                 return .more
             }
+            return result.output
         }
     }
 
@@ -101,7 +103,7 @@ class LocalLLMService {
     func unload() {
         modelContainer = nil
         isLoaded = false
-        loadStatus = "Not loaded"
+        loadStatus = String(localized: "Not loaded")
     }
 
     // MARK: - Model selection
@@ -121,5 +123,5 @@ class LocalLLMService {
 
 enum LLMError: LocalizedError {
     case notLoaded
-    var errorDescription: String? { "LLM model is not loaded." }
+    var errorDescription: String? { String(localized: "The AI model is not loaded.") }
 }

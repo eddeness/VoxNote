@@ -1,6 +1,6 @@
 import Foundation
 
-struct TranscriptSegment: Identifiable, Equatable, Codable {
+nonisolated struct TranscriptSegment: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     let startTime: TimeInterval
     let endTime: TimeInterval

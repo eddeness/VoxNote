@@ -142,12 +142,19 @@ struct RecordingRowView: View {
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .translationTask(vm.translationState(for: recording.id).config) { session in
+        .translationTask(vm.translationState(for: recording.id).config) { @Sendable session in
+            let segments = await vm.pendingTranslationSegments(for: recording.id)
+            guard !segments.isEmpty else { return }
             do {
-                try await vm.performTranslation(for: recording.id, using: session)
+                let requests = segments.map {
+                    TranslationSession.Request(sourceText: $0.text, clientIdentifier: $0.id.uuidString)
+                }
+                let responses = try await session.translations(from: requests)
+                let result = responses.map(\.targetText).joined(separator: "\n\n")
+                await vm.applyTranslationResult(result, for: recording.id)
             } catch {
                 await MainActor.run {
-                    vm.translationStates[recording.id] = .error("Translation unavailable. Please allow language download and try again.")
+                    vm.translationStates[recording.id] = .error(String(localized: "Translation unavailable. Please allow language download and try again."))
                     vm.translationState(for: recording.id).config = nil
                 }
             }
@@ -195,10 +202,10 @@ struct RecordingRowView: View {
                 .disabled(vm.isTranscribing)
                 .opacity(vm.isTranscribing ? 0.4 : 1)
             }
-        case .transcribing(let msg):
+        case .transcribing(let progress):
             HStack(spacing: 6) {
-                loadingChip(msg)
-                if !msg.lowercased().hasPrefix("preparing"), !msg.lowercased().hasPrefix("loading") {
+                loadingChip(progress.message)
+                if progress.isCancellable {
                     Button {
                         vm.cancelTranscribe(for: recording)
                     } label: {
@@ -223,10 +230,10 @@ struct RecordingRowView: View {
     @ViewBuilder
     private func transcriptSection(_ state: TranscribeState) -> some View {
         switch state {
-        case .transcribing(let msg):
+        case .transcribing(let progress):
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.7)
-                Text(msg).font(.caption).foregroundStyle(.secondary)
+                Text(progress.message).font(.caption).foregroundStyle(.secondary)
             }
         case .done(let segments):
             ScrollView {
@@ -289,7 +296,7 @@ struct RecordingRowView: View {
                             Task { await vm.summarize(recording, language: selectedSummaryLanguage) }
                         }
                     case .running:
-                        loadingChip("Summarizing…")
+                        loadingChip(String(localized: "Summarizing…"))
                     case .done:
                         actionChip(label: "Clear", icon: "xmark.circle", color: .secondary) {
                             vm.clearSummary(for: recording)
@@ -342,7 +349,7 @@ struct RecordingRowView: View {
                             vm.triggerTranslation(recording, from: detectedLang, to: selectedTranslationLanguage)
                         }
                     case .running:
-                        loadingChip("Translating…")
+                        loadingChip(String(localized: "Translating…"))
                     case .done:
                         actionChip(label: "Clear", icon: "xmark.circle", color: .secondary) {
                             vm.clearTranslation(for: recording)
@@ -415,7 +422,7 @@ struct RecordingRowView: View {
         }
     }
 
-    private func actionChip(label: String, icon: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func actionChip(label: LocalizedStringKey, icon: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(label, systemImage: icon)
                 .font(.caption.weight(.semibold))

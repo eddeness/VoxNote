@@ -1,7 +1,7 @@
 import Foundation
 import CoreTransferable
 
-struct Recording: Identifiable, Equatable, Sendable {
+nonisolated struct Recording: Identifiable, Equatable, Sendable {
     let id: UUID
     let url: URL
     let createdAt: Date
@@ -38,7 +38,7 @@ struct Recording: Identifiable, Equatable, Sendable {
 }
 
 extension Recording: Transferable {
-    static var transferRepresentation: some TransferRepresentation {
+    nonisolated static var transferRepresentation: some TransferRepresentation {
         ProxyRepresentation(exporting: { $0.id.uuidString })
     }
 }

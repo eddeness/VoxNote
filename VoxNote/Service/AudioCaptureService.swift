@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Observation
 
 enum RecordingError: LocalizedError {
@@ -59,22 +59,37 @@ class AudioCaptureService {
         let filename = "rec_\(Int(Date().timeIntervalSince1970)).wav"
         let url = Self.recordingsDirectory.appendingPathComponent(filename)
         recordingURL = url
-        audioFile = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
+        let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
+        audioFile = file
 
         let converter = AVAudioConverter(from: inputFormat, to: recordFormat)!
 
         recordingStartTime = Date()
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self else { return }
+        // The tap block runs on a realtime audio thread, NOT the main actor, so it
+        // must never touch @MainActor-isolated state on `self` synchronously —
+        // Swift 6's runtime isolation checks would run dispatch_assert_queue(main)
+        // on the audio thread and crash (_dispatch_assert_queue_fail). Capture
+        // everything the block needs as locals, and hop to the main actor only for
+        // the rare max-duration stop.
+        let startTime = Date()
+        let maxDuration = maxRecordingDuration
+        let onMaxReached: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                _ = self.stopRecording()
+                self.onMaxDurationReached?()
+            }
+        }
 
+        // @Sendable makes this closure non-isolated. Without it, the project's
+        // SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor infers the tap block as
+        // @MainActor, and CoreAudio invoking it on the realtime audio thread trips
+        // Swift's executor check (dispatch_assert_queue(main)) → crash.
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { @Sendable buffer, _ in
             // Check max duration
-            if let start = self.recordingStartTime,
-               Date().timeIntervalSince(start) >= self.maxRecordingDuration {
-                Task { @MainActor in
-                    _ = self.stopRecording()
-                    self.onMaxDurationReached?()
-                }
+            if Date().timeIntervalSince(startTime) >= maxDuration {
+                onMaxReached()
                 return
             }
 
@@ -91,7 +106,7 @@ class AudioCaptureService {
                 return buffer
             }
 
-            try? self.audioFile?.write(from: convertedBuffer)
+            try? file.write(from: convertedBuffer)
         }
 
         engine.prepare()
@@ -151,9 +166,13 @@ class AudioCaptureService {
     // MARK: - Private helpers
 
     private static func audioDuration(of url: URL) -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        let seconds = CMTimeGetSeconds(asset.duration)
-        return seconds.isNaN ? 0 : seconds
+        // Recordings are always local WAV files we wrote ourselves, so reading
+        // the frame count is exact and — unlike AVAsset.duration — synchronous
+        // and not deprecated on the current deployment target.
+        guard let file = try? AVAudioFile(forReading: url) else { return 0 }
+        let sampleRate = file.processingFormat.sampleRate
+        guard sampleRate > 0 else { return 0 }
+        return Double(file.length) / sampleRate
     }
 
     private func configureAudioSession() throws {

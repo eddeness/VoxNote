@@ -35,7 +35,7 @@ struct ExportButton: View {
 
     @ViewBuilder
     private func exportAction(
-        label: String,
+        label: LocalizedStringKey,
         systemImage: String,
         ext: String,
         content: @escaping () -> String

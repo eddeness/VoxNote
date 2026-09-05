@@ -11,7 +11,7 @@ struct OnboardingView: View {
 
     enum Status {
         case intro
-        case downloading(String)
+        case downloading(TranscribeProgress)
         case done
         case failed(String)
     }
@@ -26,9 +26,9 @@ struct OnboardingView: View {
 
     private var modelSizeText: String {
 #if os(macOS)
-        return "First-time setup downloads ~3GB AI model"
+        return String(localized: "First-time setup downloads ~3GB AI model")
 #else
-        return "First-time setup downloads ~150MB–1.5GB AI model"
+        return String(localized: "First-time setup downloads ~150MB–1.5GB AI model")
 #endif
     }
 
@@ -67,16 +67,16 @@ struct OnboardingView: View {
                 switch status {
                 case .intro:
                     VStack(spacing: 8) {
-                        InfoRow(icon: "checkmark.shield", text: "Fully on-device, no data sent to servers")
+                        InfoRow(icon: "checkmark.shield", text: String(localized: "Fully on-device, no data sent to servers"))
                         InfoRow(icon: "arrow.down.circle", text: modelSizeText)
-                        InfoRow(icon: "wifi", text: "Internet required only for initial download")
-                        InfoRow(icon: "iphone", text: "iPhone 12 or later / Apple Silicon Mac recommended")
+                        InfoRow(icon: "wifi", text: String(localized: "Internet required only for initial download"))
+                        InfoRow(icon: "iphone", text: String(localized: "iPhone 12 or later / Apple Silicon Mac recommended"))
 
                         // Disk space row
                         if availableGB > 0 {
                             InfoRow(
                                 icon: diskSpaceOK ? "internaldrive" : "exclamationmark.triangle",
-                                text: String(format: "Available disk space: %.1f GB", availableGB)
+                                text: String(format: String(localized: "Available disk space: %.1f GB"), availableGB)
                             )
                             .foregroundStyle(diskSpaceOK ? .secondary : Color.orange)
                         }
@@ -102,11 +102,11 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
-                case .downloading(let msg):
+                case .downloading(let progress):
                     VStack(spacing: 12) {
                         ProgressView()
                             .progressViewStyle(.circular)
-                        Text(msg)
+                        Text(progress.message)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
@@ -114,7 +114,7 @@ struct OnboardingView: View {
                         // Cancel is only meaningful while the file is downloading.
                         // Once model loading (CoreML compilation) starts, cancellation
                         // may not stop the work already in progress, so hide it.
-                        if isCancellable(msg) {
+                        if progress.isCancellable {
                             Button("Cancel") {
                                 downloadTask?.cancel()
                                 downloadTask = nil
@@ -186,18 +186,6 @@ struct OnboardingView: View {
         }
     }
 
-    private func isCancellable(_ msg: String) -> Bool {
-        // Only cancellable while actively downloading, and only below 90% —
-        // past that point the transfer is close enough to done that cancelling
-        // wastes more than it saves, and loading (CoreML compile) is imminent.
-        guard msg.lowercased().hasPrefix("downloading") else { return false }
-        if let pctRange = msg.range(of: #"\d+"#, options: .regularExpression),
-           let pct = Int(msg[pctRange]) {
-            return pct < 90
-        }
-        return true
-    }
-
     private func checkDiskSpace() {
         let url = URL(fileURLWithPath: NSHomeDirectory())
         let values = try? url.resourceValues(
@@ -209,12 +197,12 @@ struct OnboardingView: View {
     }
 
     private func downloadModel() async {
-        status = .downloading("Starting…")
+        status = .downloading(TranscribeProgress(phase: .preparing))
         downloadTask = Task {
-            await vm.loadWhisperModel { msg in
+            await vm.loadWhisperModel { progress in
                 Task { @MainActor in
                     if !Task.isCancelled {
-                        status = .downloading(msg)
+                        status = .downloading(progress)
                     }
                 }
             }

@@ -214,7 +214,7 @@ struct LiveTranscribeView: View {
                 await vm.loadWhisperModel()
             }
             guard let pipe = vm.whisperPipe else {
-                errorMessage = "Failed to load model."
+                errorMessage = String(localized: "Failed to load model.")
                 return
             }
             liveService.loadModel(pipe)
@@ -263,7 +263,7 @@ private struct LiveLineRow: View {
     let item: LiveLine
     let translationEnabled: Bool
     let targetLanguage: TranslationLanguage
-    let onTranslated: (String) -> Void
+    let onTranslated: @MainActor (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -284,11 +284,13 @@ private struct LiveLineRow: View {
                 }
             }
         }
-        .translationTask(item.translationState.config) { session in
+        .translationTask(item.translationState.config) { @Sendable [original = item.original] session in
             do {
-                let response = try await session.translate(item.original)
+                // Capture only the Sendable String up front so neither `item`
+                // nor `session` is sent across the actor hop below.
+                let text = try await session.translate(original).targetText
                 await MainActor.run {
-                    onTranslated(response.targetText)
+                    onTranslated(text)
                 }
             } catch {
                 // Leave as "Translating…" on failure rather than showing

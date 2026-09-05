@@ -12,7 +12,7 @@ enum AppState: Equatable {
 }
 
 enum TranscribeState: Equatable {
-    case transcribing(String)
+    case transcribing(TranscribeProgress)
     case done([TranscriptSegment])
     case error(String)
 }
@@ -36,7 +36,7 @@ class MainViewModel {
     var appState: AppState = .ready
     var recordings: [Recording] = []
     var allMetadata: [RecordingMetadata] = []
-    var statusMessage = "Ready"
+    var statusMessage = String(localized: "Ready")
     var elapsedSeconds: Int = 0
 
     // MARK: - Per-recording states
@@ -62,7 +62,11 @@ class MainViewModel {
 
     // MARK: - Whisper model state
     var isWhisperLoaded = false
-    var whisperStatus = "Model not loaded"
+    var whisperStatus = String(localized: "Model not loaded")
+    // Non-nil while the Whisper model is loading. UI keys off this (and its
+    // percent) instead of parsing the display string, which is localized.
+    var whisperLoadProgress: TranscribeProgress?
+    var isLoadingWhisper: Bool { whisperLoadProgress != nil }
     var showMicrophonePermissionAlert = false
 
     private var recordingTimer: Timer?
@@ -103,7 +107,7 @@ class MainViewModel {
     }
 
     var folderPathName: String {
-        currentFolder?.name ?? "Home"
+        currentFolder?.name ?? String(localized: "Home")
     }
 
     var isAtRoot: Bool {
@@ -157,21 +161,25 @@ class MainViewModel {
 
     // MARK: - Whisper model
 
-    func loadWhisperModel(onProgress: ((String) -> Void)? = nil) async {
+    func loadWhisperModel(onProgress: (@Sendable (TranscribeProgress) -> Void)? = nil) async {
         guard !isWhisperLoaded else { return }
-        whisperStatus = "Loading model…"
+        let initial = TranscribeProgress(phase: .preparing)
+        whisperLoadProgress = initial
+        whisperStatus = initial.message
         do {
-            try await transcription.load { [weak self] msg in
+            try await transcription.load { [weak self] progress in
                 Task { @MainActor [weak self] in
-                    self?.whisperStatus = msg
-                    onProgress?(msg)
+                    self?.whisperLoadProgress = progress
+                    self?.whisperStatus = progress.message
+                    onProgress?(progress)
                 }
             }
             isWhisperLoaded = true
-            whisperStatus = "Model ready"
+            whisperStatus = String(localized: "Model ready")
         } catch {
-            whisperStatus = "Failed: \(error.localizedDescription)"
+            whisperStatus = String(localized: "Failed: \(error.localizedDescription)")
         }
+        whisperLoadProgress = nil
     }
 
     // MARK: - Recording
@@ -194,7 +202,7 @@ class MainViewModel {
             self.recordingTimer?.invalidate()
             self.recordingTimer = nil
             self.appState = .ready
-            self.statusMessage = "Saved"
+            self.statusMessage = String(localized: "Saved")
             self.loadRecordings()
             self.showMaxDurationAlert = true
 
@@ -213,7 +221,7 @@ class MainViewModel {
                 try await audio.startRecording()
                 appState = .recording
                 elapsedSeconds = 0
-                statusMessage = "Recording…"
+                statusMessage = String(localized: "Recording…")
                 recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                     Task { @MainActor [weak self] in
                         self?.elapsedSeconds += 1
@@ -235,7 +243,7 @@ class MainViewModel {
         recordingTimer = nil
         _ = audio.stopRecording()
         appState = .ready
-        statusMessage = "Saved"
+        statusMessage = String(localized: "Saved")
         loadRecordings()
 
         // 새 녹음을 현재 폴더에 자동 배치
@@ -279,6 +287,15 @@ class MainViewModel {
         translationStates.removeAll()
         translationStateObjects.removeAll()
         pendingTranslationTexts.removeAll()
+
+        if let context = modelContext {
+            let filenames = Set(recordings.map(\.filename))
+            for metadata in allMetadata where filenames.contains(metadata.filename) {
+                context.delete(metadata)
+            }
+            try? context.save()
+        }
+
         recordings.forEach { try? AudioCaptureService.delete($0) }
         loadRecordings()
     }
@@ -296,7 +313,7 @@ class MainViewModel {
 
     // MARK: - Transcription
     var isProcessing: Bool {
-        !isWhisperLoaded && whisperStatus != "Model not loaded" ||
+        isLoadingWhisper ||
         transcribeStates.values.contains {
             if case .transcribing = $0 { return true }
             return false
@@ -323,38 +340,38 @@ class MainViewModel {
         let lang: String? = language
 
         if !isWhisperLoaded {
-            transcribeStates[id] = .transcribing("Loading Model...")
-            await loadWhisperModel { [weak self] msg in
+            transcribeStates[id] = .transcribing(TranscribeProgress(phase: .loadingModel))
+            await loadWhisperModel { [weak self] progress in
                 Task { @MainActor [weak self] in
-                    self?.transcribeStates[id] = .transcribing(msg)
+                    self?.transcribeStates[id] = .transcribing(progress)
                 }
             }
         }
 
         guard isWhisperLoaded else {
-            transcribeStates[id] = .error("Failed to load model")
+            transcribeStates[id] = .error(String(localized: "Failed to load model"))
             return
         }
 
-        transcribeStates[id] = .transcribing("Transcribing… 0%")
+        transcribeStates[id] = .transcribing(TranscribeProgress(phase: .transcribing, percent: 0))
         do {
             let segments = try await transcription.transcribe(
                 audioURL: recording.url,
                 language: lang,
-                onProgress: { [weak self] msg in
+                onProgress: { [weak self] progress in
                     Task { @MainActor [weak self] in
-                        self?.transcribeStates[id] = .transcribing(msg)
+                        self?.transcribeStates[id] = .transcribing(progress)
                     }
                 }
             )
             if segments.isEmpty {
-                transcribeStates[id] = .error("No speech detected")
+                transcribeStates[id] = .error(String(localized: "No speech detected"))
             } else {
                 transcribeStates[id] = .done(segments)
                 saveMetadata(for: recording, segments: segments)
             }
         } catch is CancellationError {
-            transcribeStates[id] = .error("Cancelled")
+            transcribeStates[id] = .error(String(localized: "Cancelled"))
         } catch {
             transcribeStates[id] = .error(error.localizedDescription)
         }
@@ -362,7 +379,7 @@ class MainViewModel {
 
     func cancelTranscribe(for recording: Recording) {
         transcription.cancel()
-        transcribeStates[recording.id] = .error("Cancelled")
+        transcribeStates[recording.id] = .error(String(localized: "Cancelled"))
     }
 
     func clearTranscript(for recording: Recording) {
@@ -402,9 +419,7 @@ class MainViewModel {
                 summaryStates[id] = .running("")
             }
 
-            var output = ""
-            try await llm.summarize(text: fullText, language: language) { fullDecoded in
-                output = fullDecoded
+            let output = try await llm.summarize(text: fullText, language: language) { fullDecoded in
                 Task { @MainActor in self.summaryStates[recording.id] = .running(fullDecoded) }
             }
             summaryStates[recording.id] = .done(output)
@@ -438,7 +453,7 @@ class MainViewModel {
             switch status {
             case .installed, .supported:
                 self.pendingTranslationTexts[id] = segments
-                self.translationStates[id] = .running("Translating…")
+                self.translationStates[id] = .running(String(localized: "Translating…"))
 
                 let state = self.translationState(for: id)
                 state.config = nil
@@ -448,23 +463,23 @@ class MainViewModel {
                     target: language.locale
                 )
             case .unsupported:
-                self.translationStates[id] = .error("This language pair is not supported.")
+                self.translationStates[id] = .error(String(localized: "This language pair is not supported."))
             @unknown default:
-                self.translationStates[id] = .error("Unknown language availability.")
+                self.translationStates[id] = .error(String(localized: "Unknown language availability."))
             }
         }
     }
 
-    func performTranslation(for recordingID: UUID, using session: TranslationSession) async throws {
-        guard let segments = pendingTranslationTexts[recordingID], !segments.isEmpty else { return }
+    // The TranslationSession call itself must happen off the main actor (its
+    // `translations(from:)` is @concurrent), so the view model only vends the
+    // Sendable inputs and receives the finished result — the session is used
+    // directly inside the caller's @Sendable translationTask closure.
+    func pendingTranslationSegments(for recordingID: UUID) -> [TranscriptSegment] {
+        pendingTranslationTexts[recordingID] ?? []
+    }
 
-        let requests = segments.map {
-            TranslationSession.Request(sourceText: $0.text, clientIdentifier: $0.id.uuidString)
-        }
-        let responses = try await session.translations(from: requests)
-        let result = responses.map(\.targetText).joined(separator: "\n\n")
-        translationStates[recordingID] = .done(result)
-
+    func applyTranslationResult(_ text: String, for recordingID: UUID) {
+        translationStates[recordingID] = .done(text)
         pendingTranslationTexts.removeValue(forKey: recordingID)
     }
 

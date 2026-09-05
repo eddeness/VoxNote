@@ -120,11 +120,10 @@ struct MainView: View {
 
             Spacer()
 
-            if !vm.isWhisperLoaded && vm.whisperStatus != "Model not loaded" {
+            if vm.isLoadingWhisper {
                 HStack(spacing: 6) {
-                    if vm.whisperStatus.contains("%") {
-                        let pct = Double(vm.whisperStatus.filter("0123456789".contains)) ?? 0
-                        ProgressView(value: pct, total: 100)
+                    if let pct = vm.whisperLoadProgress?.percent {
+                        ProgressView(value: Double(pct), total: 100)
                             .progressViewStyle(.linear)
                             .frame(width: 80)
                     } else {

@@ -69,7 +69,7 @@ class RecordingMetadata {
 
 // MARK: - Codable wrapper for TranscriptSegment
 
-struct CodableSegment: Codable {
+nonisolated struct CodableSegment: Codable {
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String

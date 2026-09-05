@@ -89,7 +89,7 @@ struct FolderRowView: View {
 // MARK: - Rename sheet (reusable)
 
 struct RenameSheet: View {
-    let title: String
+    let title: LocalizedStringKey
     let initialName: String
     let onSave: (String) -> Void
     let onCancel: () -> Void
@@ -133,7 +133,7 @@ struct RenameSheet: View {
     private func save() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard NameValidator.isValid(trimmed) else {
-            errorMessage = "Name must be 1-50 characters and cannot contain / \\ : * ? \" < > |"
+            errorMessage = String(localized: "Name must be 1-50 characters and cannot contain / \\ : * ? \" < > |")
             return
         }
         onSave(trimmed)

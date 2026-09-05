@@ -14,16 +14,15 @@ class TranscriptionService {
     var loadedPipe: WhisperKit? { pipe }
 
     // MARK: - Setup
-    func load(onProgress: @escaping (String) -> Void) async throws {
+    func load(onProgress: @escaping @Sendable (TranscribeProgress) -> Void) async throws {
         setupTask?.cancel()
 
         let task = Task { [weak self] in
             guard let self else { throw CancellationError() }
-            
+
             let model = selectModel()
-            print("defaulut model: \(model)")
-            
-            onProgress("Preparing model…")
+
+            onProgress(TranscribeProgress(phase: .preparing))
 
             _ = try await WhisperKit.download(
                 variant: model,
@@ -32,14 +31,14 @@ class TranscriptionService {
 
                     let pct = Int(progress.fractionCompleted * 100)
                     if pct < 100 {
-                        Task { @MainActor in onProgress("Downloading model… \(pct)%") }
+                        Task { @MainActor in onProgress(TranscribeProgress(phase: .downloading, percent: pct)) }
                     }
                 }
             )
 
             try Task.checkCancellation()
 
-            onProgress("Loading model…")
+            onProgress(TranscribeProgress(phase: .loadingModel))
 
             self.pipe = try await WhisperKit(
                 WhisperKitConfig(
@@ -55,7 +54,7 @@ class TranscriptionService {
             )
 
             try Task.checkCancellation()
-            onProgress("Model ready")
+            onProgress(TranscribeProgress(phase: .loadingModel, percent: 100))
         }
 
         setupTask = task
@@ -73,7 +72,7 @@ class TranscriptionService {
     func transcribe(
         audioURL: URL,
         language: String? = nil,
-        onProgress: @escaping (String) -> Void
+        onProgress: @escaping @Sendable (TranscribeProgress) -> Void
     ) async throws -> [TranscriptSegment] {
         // Cancel any existing transcription
         currentTask?.cancel()
@@ -110,11 +109,11 @@ class TranscriptionService {
     private func run(
         audioURL: URL,
         language: String? = nil,
-        onProgress: @escaping (String) -> Void
+        onProgress: @escaping @Sendable (TranscribeProgress) -> Void
     ) async throws -> [TranscriptSegment] {
         guard let pipe else { throw TranscriptionError.notLoaded }
 
-        onProgress("Transcribing… 0%")
+        onProgress(TranscribeProgress(phase: .transcribing, percent: 0))
 
         let asset = AVURLAsset(url: audioURL)
         let duration = try await asset.load(.duration)
@@ -137,7 +136,7 @@ class TranscriptionService {
             if totalDuration > 0 {
                 let estimatedSeconds = Double(progress.windowId) * 30.0
                 let pct = min(Int((estimatedSeconds / totalDuration) * 100), 99)
-                Task { @MainActor in onProgress("Transcribing… \(pct)%") }
+                Task { @MainActor in onProgress(TranscribeProgress(phase: .transcribing, percent: pct)) }
             }
             return true
         }
@@ -187,5 +186,5 @@ class TranscriptionService {
 
 enum TranscriptionError: LocalizedError {
     case notLoaded
-    var errorDescription: String? { "WhisperKit model is not loaded yet." }
+    var errorDescription: String? { String(localized: "The transcription model is not loaded yet.") }
 }
