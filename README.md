@@ -2,7 +2,11 @@
 
 On-device voice notes for iPhone and Mac. Record audio, transcribe it, summarize it, and translate it without sending speech to a server.
 
-The first launch downloads the speech and language models. After that, recording, transcription, and summarization work offline. Translation uses Apple’s on-device Translation framework and may download a language pack the first time a pair is used.
+Built for people who want to revisit meetings, lectures, interviews, or personal ideas without uploading their recordings. The app is built with SwiftUI and SwiftData, using WhisperKit for speech recognition, MLX for local summaries, and Apple's Translation framework for translation.
+
+See the [roadmap](ROADMAP.md) for what is implemented and what is planned next.
+
+The first launch downloads the speech model. The summary model downloads the first time you summarize. After those downloads, recording, transcription, and summarization work offline. Translation uses Apple’s on-device Translation framework and may download a language pack the first time a pair is used.
 
 ## Features
 
@@ -13,7 +17,7 @@ The first launch downloads the speech and language models. After that, recording
 - Summarize a transcript on device with a Qwen 2.5 model via [MLX](https://github.com/ml-explore/mlx-swift-examples)
 - Translate a transcript with Apple Translation
 - Play recordings back in the list
-- Export a transcript as plain text or SRT
+- Share transcript text; TXT and SRT file export are planned
 
 ## Requirements
 
@@ -68,7 +72,7 @@ VoxNote/
   Component/                 Rows, onboarding, live view, pickers
 ```
 
-Audio files live in `Documents/Recordings/` as `rec_<timestamp>.wav`. Names, transcripts, summaries, translations, and folders are stored with SwiftData (`RecordingMetadata`, `RecordingFolder`) and joined to files by filename.
+Audio files live in `Documents/Recordings/` as `rec_<timestamp>.wav`. Names, transcripts, summaries, and folders are stored with SwiftData (`RecordingMetadata`, `RecordingFolder`) and joined to files by filename. Persisting completed translations is planned.
 
 ## Privacy
 

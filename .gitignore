@@ -1,0 +1,51 @@
+# macOS
+.DS_Store
+
+# Environment variables (commit only placeholder examples)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Credentials and signing material
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+*.provisionprofile
+.aws/
+
+# Developer-local configuration
+*.local.xcconfig
+
+# Xcode - build output
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode - user-specific state (per-developer, not shareable)
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode - workspace cruft
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+# NOTE: Package.resolved is intentionally NOT ignored — it pins dependency
+# versions and should be committed.
+.swiftpm/
+.build/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
